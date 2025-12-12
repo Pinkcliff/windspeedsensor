@@ -78,16 +78,14 @@ def single_connect_continuous_read():
     SLAVE_ADDR = 1               # 设备从站地址
     FUNC_CODE = 0x04             # 功能码（0x03=保持寄存器，0x04=输入寄存器）
     START_REG = 0                # 起始寄存器地址
-    REG_COUNT = 2                # 读取寄存器数量
-    READ_INTERVAL = 1            # 读取间隔（秒）
+    REG_COUNT = 10                # 读取寄存器数量
+    READ_INTERVAL = 0.1            # 读取间隔（秒）
     TIMEOUT = 5                  # 单次读写超时时间
     BUFFER_SIZE = 1024
     RECONNECT_ATTEMPT = 1        # 连接断开后的重连次数
 
     # 2. 全局变量
-    last_temperature: Optional[float] = None
-    last_pressure: Optional[float] = None
-    last_registers: List[int] = []
+    last_registers: List[int] = []  # 存储上一次读取的所有寄存器值
     read_count = 0               # 总读取次数
     success_count = 0            # 成功次数
     fail_count = 0               # 失败次数
@@ -106,6 +104,7 @@ def single_connect_continuous_read():
     print(f"📡 设备地址: {DEVICE_IP}:{DEVICE_PORT}")
     print(f"🔌 从站地址: {SLAVE_ADDR} | 功能码: 0x{FUNC_CODE:02X}")
     print(f"📝 读取范围: 寄存器{START_REG}~{START_REG+REG_COUNT-1}（共{REG_COUNT}个）")
+    print(f"📊 显示内容: 第5-8路传感器数据（寄存器索引4-7）")
     print(f"⏱️  读取间隔: {READ_INTERVAL}秒 | 超时时间: {TIMEOUT}秒")
     print(f"🔍 数据变化将以 {RED}红色{RESET} 高亮显示")
     print(f"🔄 连接断开后自动重连（{RECONNECT_ATTEMPT}次）")
@@ -209,35 +208,61 @@ def single_connect_continuous_read():
                     time.sleep(READ_INTERVAL)
                     continue
 
-                # 数据转换
-                temp_raw = registers[0]
-                pressure_raw = registers[1]
-                temperature = ((temp_raw / 249) - 4) * 7.5 - 40
-                pressure = ((pressure_raw / 249) - 4) * 7.5
+                # 数据转换 - 读取第5-8路传感器数据（索引4-7）
+                sensor_data = []
+                sensor_data_converted = []
+                sensor_data_raw = []
+
+                # 提取并转换第5-8路数据
+                for i in range(4, 8):  # 索引4-7对应第5-8路传感器
+                    raw_value = registers[i]
+                    converted_value = ((raw_value / 249) - 4) * 7.5 - 40  # 使用与温度相同的转换公式
+                    sensor_data.append(converted_value)
+                    sensor_data_converted.append(converted_value)
+                    sensor_data_raw.append(raw_value)
+
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
 
                 # 高亮变化数据
-                temp_str = f"{temperature:5.1f}℃"
-                pressure_str = f"{pressure:6.1f}kPa"
-                temp_raw_str = f"{temp_raw:4d}"
-                pressure_raw_str = f"{pressure_raw:4d}"
+                display_strings = []
+                display_raw_strings = []
 
-                if last_temperature is not None and abs(temperature - last_temperature) > 0.1:
-                    temp_str = f"{RED}{temp_str}{RESET}"
-                    temp_raw_str = f"{RED}{temp_raw_str}{RESET}"
-                
-                if last_pressure is not None and abs(pressure - last_pressure) > 0.1:
-                    pressure_str = f"{RED}{pressure_str}{RESET}"
-                    pressure_raw_str = f"{RED}{pressure_raw_str}{RESET}"
+                # 检查是否有上一次的数据记录
+                if last_registers:
+                    for i, (value, raw_value) in enumerate(zip(sensor_data_converted, sensor_data_raw)):
+                        sensor_num = i + 5  # 第5-8路
+                        # 检查与上一次的差异
+                        if len(last_registers) > 4 + i:
+                            last_value = ((last_registers[4 + i] / 249) - 4) * 7.5 - 40
+                            if abs(value - last_value) > 0.1:
+                                # 数据有变化，使用红色高亮
+                                display_str = f"{RED}{value:5.1f}℃{RESET}"
+                                display_raw_str = f"{RED}{raw_value:4d}{RESET}"
+                            else:
+                                display_str = f"{value:5.1f}℃"
+                                display_raw_str = f"{raw_value:4d}"
+                        else:
+                            display_str = f"{value:5.1f}℃"
+                            display_raw_str = f"{raw_value:4d}"
 
-                # 打印结果
-                print(f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
-                      f"温度原始值:{temp_raw_str} → {temp_str} | "
-                      f"气压原始值:{pressure_raw_str} → {pressure_str}")
+                        display_strings.append(display_str)
+                        display_raw_strings.append(display_raw_str)
+                else:
+                    # 第一次读取，没有历史数据对比
+                    display_strings = [f"{value:5.1f}℃" for value in sensor_data_converted]
+                    display_raw_strings = [f"{raw_value:4d}" for raw_value in sensor_data_raw]
+
+                # 打印结果 - 显示第5-8路传感器数据
+                output_line = f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
+                for i in range(4):
+                    sensor_num = i + 5
+                    output_line += f"第{sensor_num}路:{display_raw_strings[i]}→{display_strings[i]} "
+                    if i < 3:  # 添加分隔符
+                        output_line += "| "
+
+                print(output_line)
 
                 # 更新记录
-                last_temperature = temperature
-                last_pressure = pressure
                 last_registers = registers.copy()
                 success_count += 1
                 read_success = True
