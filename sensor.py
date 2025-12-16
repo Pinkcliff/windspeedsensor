@@ -172,15 +172,6 @@ def single_connect_continuous_read():
                     func_code=FUNC_CODE
                 )
 
-                # 输出发送数据（用于调试）
-                print(f"\n[{current_time}] 📤 发送的Modbus请求: {request.hex(' ').upper()}")
-                print(f"  请求长度: {len(request)} 字节")
-                print(f"  从站地址: {request[0]:02X}")
-                print(f"  功能码: {request[1]:02X}")
-                print(f"  起始寄存器: {(request[2] << 8) | request[3]:04X}")
-                print(f"  寄存器数量: {(request[4] << 8) | request[5]:04X}")
-                print(f"  CRC校验: {request[6]:02X} {request[7]:02X}")
-
                 # 发送请求
                 sock.sendall(request)
 
@@ -203,16 +194,6 @@ def single_connect_continuous_read():
                     if time.time() - request_start_time > TIMEOUT:
                         raise socket.timeout(f"接收超时（{TIMEOUT}秒）")
                     time.sleep(0.01)
-
-                # 输出原始数据（用于调试）
-                print(f"\n[{current_time}] 📡 接收到的原始数据: {response_bytes.hex(' ').upper()}")
-                print(f"  数据长度: {len(response_bytes)} 字节")
-                if len(response_bytes) >= 2:
-                    print(f"  从站地址: {response_bytes[0]:02X}")
-                if len(response_bytes) >= 3:
-                    print(f"  功能码: {response_bytes[1]:02X}")
-                if len(response_bytes) >= 4:
-                    print(f"  字节数: {response_bytes[2]:02X}")
 
                 # 解析响应
                 parsed_data = parse_rtu_response(response_bytes)
@@ -247,13 +228,6 @@ def single_connect_continuous_read():
                     sensor_data_raw.append(raw_value)
 
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
-
-                # 输出所有寄存器的原始值（用于调试）
-                print(f"\n[{current_time}] 📊 原始寄存器值:")
-                for i, reg in enumerate(registers):
-                    current = reg / 249
-                    print(f"  寄存器{i}: {reg:5d} → {current:6.3f}mA")
-                print()
 
                 # 高亮变化数据
                 display_strings = []
