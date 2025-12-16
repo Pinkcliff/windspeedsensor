@@ -104,7 +104,9 @@ def single_connect_continuous_read():
     print(f"📡 设备地址: {DEVICE_IP}:{DEVICE_PORT}")
     print(f"🔌 从站地址: {SLAVE_ADDR} | 功能码: 0x{FUNC_CODE:02X}")
     print(f"📝 读取范围: 寄存器{START_REG}~{START_REG+REG_COUNT-1}（共{REG_COUNT}个）")
-    print(f"📊 显示内容: 第5-8路风速传感器数据（寄存器索引4-7）")
+    print(f"📊 显示内容: 第1路温度 | 第2路压力 | 第5-8路风速传感器")
+    print(f"🌡️  温度计算: (电流值-4mA) × 7.5 - 40 = 温度(℃) [量程: -40~80℃]")
+    print(f"🔧 压力计算: (电流值-4mA) × 7.5 = 压力(kPa) [量程: 0~120kPa]")
     print(f"🌬️  风速计算: (电流值-4mA) × 30 ÷ 16 = 风速(m/s)")
     print(f"⏱️  读取间隔: {READ_INTERVAL}秒 | 超时时间: {TIMEOUT}秒")
     print(f"🔍 数据变化将以 {RED}红色{RESET} 高亮显示")
@@ -216,57 +218,103 @@ def single_connect_continuous_read():
                 sensor_data_converted = []
                 sensor_data_raw = []
 
-                # 提取并转换第5-8路数据（风速传感器）
+                # 提取并转换所有传感器数据
+                sensor_data = []
+                sensor_data_converted = []
+                sensor_data_raw = []
+
+                # 第1路：温度传感器
+                raw_value = registers[0]
+                current_value = raw_value / 249  # 转换为电流值(mA)
+                # 温度计算公式: (电流值 - 4mA) × 7.5 - 40 = 温度(℃)
+                # 温度量程: -40℃ ~ 80℃，对应4~20mA，共120°C范围
+                temperature = (current_value - 4) * 7.5 - 40
+                sensor_data_converted.append(temperature)
+                sensor_data_raw.append(raw_value)
+
+                # 第2路：压力传感器
+                raw_value = registers[1]
+                current_value = raw_value / 249  # 转换为电流值(mA)
+                # 压力计算公式: (电流值 - 4mA) × 7.5 = 压力(kPa)
+                # 压力量程: 0~120kPa，对应4~20mA，7.5kPa/mA
+                pressure = (current_value - 4) * 7.5
+                sensor_data_converted.append(pressure)
+                sensor_data_raw.append(raw_value)
+
+                # 第5-8路：风速传感器
+                wind_speeds = []
                 for i in range(4, 8):  # 索引4-7对应第5-8路传感器
                     raw_value = registers[i]
                     # 将原始值转换为电流值(mA): raw_value / 249
                     current_value = raw_value / 249
                     # 风速计算公式: (当前电流值 - 4mA) * 30 / 16 = 风速值(m/s)
                     wind_speed = (current_value - 4) * 30 / 16
-                    sensor_data.append(wind_speed)
-                    sensor_data_converted.append(wind_speed)
-                    sensor_data_raw.append(raw_value)
+                    wind_speeds.append(wind_speed)
+
+                # 合并所有传感器数据
+                sensor_data = sensor_data_converted + wind_speeds
 
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
 
                 # 高亮变化数据
-                display_strings = []
-                display_raw_strings = []
-
                 # 检查是否有上一次的数据记录
                 if last_registers:
-                    for i, (value, raw_value) in enumerate(zip(sensor_data_converted, sensor_data_raw)):
-                        sensor_num = i + 5  # 第5-8路
-                        # 检查与上一次的差异
-                        if len(last_registers) > 4 + i:
-                            # 计算上一次的风速值
-                            last_current = last_registers[4 + i] / 249  # 转换为电流值
-                            last_value = (last_current - 4) * 30 / 16  # 计算风速
-                            if abs(value - last_value) > 0.1:
-                                # 数据有变化，使用红色高亮
-                                display_str = f"{RED}{value:5.1f}m/s{RESET}"
-                                display_raw_str = f"{RED}{raw_value:4d}{RESET}"
-                            else:
-                                display_str = f"{value:5.1f}m/s"
-                                display_raw_str = f"{raw_value:4d}"
-                        else:
-                            display_str = f"{value:5.1f}m/s"
-                            display_raw_str = f"{raw_value:4d}"
+                    # 计算上一次的值
+                    last_temp_current = last_registers[0] / 249
+                    last_temp = (last_temp_current - 4) * 7.5 - 40
 
-                        display_strings.append(display_str)
-                        display_raw_strings.append(display_raw_str)
+                    last_pressure_current = last_registers[1] / 249
+                    last_pressure = (last_pressure_current - 4) * 7.5
+
+                    last_winds = []
+                    for i in range(4, 8):
+                        last_current = last_registers[i] / 249
+                        last_wind = (last_current - 4) * 30 / 16
+                        last_winds.append(last_wind)
+
+                    # 温度显示
+                    if abs(temperature - last_temp) > 0.1:
+                        temp_str = f"{RED}{temperature:5.1f}℃{RESET}"
+                        temp_raw_str = f"{RED}{registers[0]:4d}{RESET}"
+                    else:
+                        temp_str = f"{temperature:5.1f}℃"
+                        temp_raw_str = f"{registers[0]:4d}"
+
+                    # 压力显示
+                    if abs(pressure - last_pressure) > 0.1:
+                        pressure_str = f"{RED}{pressure:5.1f}kPa{RESET}"
+                        pressure_raw_str = f"{RED}{registers[1]:4d}{RESET}"
+                    else:
+                        pressure_str = f"{pressure:5.1f}kPa"
+                        pressure_raw_str = f"{registers[1]:4d}"
+
+                    # 风速显示
+                    wind_strs = []
+                    wind_raw_strs = []
+                    for i, wind in enumerate(wind_speeds):
+                        if abs(wind - last_winds[i]) > 0.1:
+                            wind_strs.append(f"{RED}{wind:5.1f}m/s{RESET}")
+                            wind_raw_strs.append(f"{RED}{registers[4+i]:4d}{RESET}")
+                        else:
+                            wind_strs.append(f"{wind:5.1f}m/s")
+                            wind_raw_strs.append(f"{registers[4+i]:4d}")
                 else:
                     # 第一次读取，没有历史数据对比
-                    display_strings = [f"{value:5.1f}m/s" for value in sensor_data_converted]
-                    display_raw_strings = [f"{raw_value:4d}" for raw_value in sensor_data_raw]
+                    temp_str = f"{temperature:5.1f}℃"
+                    temp_raw_str = f"{registers[0]:4d}"
+                    pressure_str = f"{pressure:5.1f}kPa"
+                    pressure_raw_str = f"{registers[1]:4d}"
+                    wind_strs = [f"{wind:5.1f}m/s" for wind in wind_speeds]
+                    wind_raw_strs = [f"{registers[4+i]:4d}" for i in range(4)]
 
-                # 打印结果 - 显示第5-8路传感器数据
+                # 打印结果 - 显示所有传感器数据
                 output_line = f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
-                for i in range(4):
-                    sensor_num = i + 5
-                    output_line += f"第{sensor_num}路:{display_raw_strings[i]}→{display_strings[i]} "
-                    if i < 3:  # 添加分隔符
-                        output_line += "| "
+                output_line += f"温度:{temp_raw_str}→{temp_str} | "
+                output_line += f"压力:{pressure_raw_str}→{pressure_str} | "
+                output_line += f"风速:{wind_raw_strs[0]}→{wind_strs[0]} | "
+                output_line += f"{wind_raw_strs[1]}→{wind_strs[1]} | "
+                output_line += f"{wind_raw_strs[2]}→{wind_strs[2]} | "
+                output_line += f"{wind_raw_strs[3]}→{wind_strs[3]}"
 
                 print(output_line)
 
