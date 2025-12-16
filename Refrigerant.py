@@ -1,5 +1,4 @@
 import math
-import CoolProp.CoolProp
 class ref:
     def __init__(self):
         pass
