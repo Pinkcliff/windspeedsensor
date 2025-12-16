@@ -104,7 +104,8 @@ def single_connect_continuous_read():
     print(f"📡 设备地址: {DEVICE_IP}:{DEVICE_PORT}")
     print(f"🔌 从站地址: {SLAVE_ADDR} | 功能码: 0x{FUNC_CODE:02X}")
     print(f"📝 读取范围: 寄存器{START_REG}~{START_REG+REG_COUNT-1}（共{REG_COUNT}个）")
-    print(f"📊 显示内容: 第5-8路传感器数据（寄存器索引4-7）")
+    print(f"📊 显示内容: 第5-8路风速传感器数据（寄存器索引4-7）")
+    print(f"🌬️  风速计算: (电流值-4mA) × 30 ÷ 16 = 风速(m/s)")
     print(f"⏱️  读取间隔: {READ_INTERVAL}秒 | 超时时间: {TIMEOUT}秒")
     print(f"🔍 数据变化将以 {RED}红色{RESET} 高亮显示")
     print(f"🔄 连接断开后自动重连（{RECONNECT_ATTEMPT}次）")
@@ -213,12 +214,15 @@ def single_connect_continuous_read():
                 sensor_data_converted = []
                 sensor_data_raw = []
 
-                # 提取并转换第5-8路数据
+                # 提取并转换第5-8路数据（风速传感器）
                 for i in range(4, 8):  # 索引4-7对应第5-8路传感器
                     raw_value = registers[i]
-                    converted_value = ((raw_value / 249) - 4) * 7.5 - 40  # 使用与温度相同的转换公式
-                    sensor_data.append(converted_value)
-                    sensor_data_converted.append(converted_value)
+                    # 风速计算公式: (当前电流值 - 4mA) * 30 / 16 = 风速值(m/s)
+                    # 将raw_value转换为电流值: raw_value / 249 * 20 (0-20mA)
+                    current_value = raw_value / 249 * 20
+                    wind_speed = (current_value - 4) * 30 / 16
+                    sensor_data.append(wind_speed)
+                    sensor_data_converted.append(wind_speed)
                     sensor_data_raw.append(raw_value)
 
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
@@ -233,23 +237,25 @@ def single_connect_continuous_read():
                         sensor_num = i + 5  # 第5-8路
                         # 检查与上一次的差异
                         if len(last_registers) > 4 + i:
-                            last_value = ((last_registers[4 + i] / 249) - 4) * 7.5 - 40
+                            # 计算上一次的风速值
+                            last_current = last_registers[4 + i] / 249 * 20
+                            last_value = (last_current - 4) * 30 / 16
                             if abs(value - last_value) > 0.1:
                                 # 数据有变化，使用红色高亮
-                                display_str = f"{RED}{value:5.1f}℃{RESET}"
+                                display_str = f"{RED}{value:5.1f}m/s{RESET}"
                                 display_raw_str = f"{RED}{raw_value:4d}{RESET}"
                             else:
-                                display_str = f"{value:5.1f}℃"
+                                display_str = f"{value:5.1f}m/s"
                                 display_raw_str = f"{raw_value:4d}"
                         else:
-                            display_str = f"{value:5.1f}℃"
+                            display_str = f"{value:5.1f}m/s"
                             display_raw_str = f"{raw_value:4d}"
 
                         display_strings.append(display_str)
                         display_raw_strings.append(display_raw_str)
                 else:
                     # 第一次读取，没有历史数据对比
-                    display_strings = [f"{value:5.1f}℃" for value in sensor_data_converted]
+                    display_strings = [f"{value:5.1f}m/s" for value in sensor_data_converted]
                     display_raw_strings = [f"{raw_value:4d}" for raw_value in sensor_data_raw]
 
                 # 打印结果 - 显示第5-8路传感器数据
