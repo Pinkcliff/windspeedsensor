@@ -218,9 +218,8 @@ def single_connect_continuous_read():
                 for i in range(4, 8):  # 索引4-7对应第5-8路传感器
                     raw_value = registers[i]
                     # 风速计算公式: (当前电流值 - 4mA) * 30 / 16 = 风速值(m/s)
-                    # 将raw_value转换为电流值: raw_value / 249 * 20 (0-20mA)
-                    current_value = raw_value / 249 * 20
-                    wind_speed = (current_value - 4) * 30 / 16
+                    # raw_value已经是电流值(mA)
+                    wind_speed = (raw_value - 4) * 30 / 16
                     sensor_data.append(wind_speed)
                     sensor_data_converted.append(wind_speed)
                     sensor_data_raw.append(raw_value)
@@ -238,8 +237,8 @@ def single_connect_continuous_read():
                         # 检查与上一次的差异
                         if len(last_registers) > 4 + i:
                             # 计算上一次的风速值
-                            last_current = last_registers[4 + i] / 249 * 20
-                            last_value = (last_current - 4) * 30 / 16
+                            # last_registers[4+i]已经是电流值(mA)
+                            last_value = (last_registers[4 + i] - 4) * 30 / 16
                             if abs(value - last_value) > 0.1:
                                 # 数据有变化，使用红色高亮
                                 display_str = f"{RED}{value:5.1f}m/s{RESET}"
