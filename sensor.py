@@ -226,6 +226,12 @@ def single_connect_continuous_read():
 
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
 
+                # 输出所有寄存器的原始值（用于调试）
+                print(f"\n[{current_time}] 📊 原始寄存器值:")
+                for i, reg in enumerate(registers):
+                    print(f"  寄存器{i}: {reg:5d}")
+                print()
+
                 # 高亮变化数据
                 display_strings = []
                 display_raw_strings = []
