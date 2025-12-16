@@ -1,6 +1,6 @@
 """
-实时绘制风速数据
-显示四个风速传感器的原始值和滤波后的值
+Real-time Wind Speed Plotter
+Display original and filtered values from 4 wind speed sensors
 """
 
 import socket
@@ -12,7 +12,7 @@ from collections import deque
 from kalman_filter import create_wind_speed_filter
 from typing import List, Optional
 
-# Modbus RTU 帧处理函数
+# Modbus RTU frame processing functions
 def modbus_crc(data: List[int]) -> List[int]:
     crc = 0xFFFF
     for byte in data:
@@ -41,7 +41,7 @@ def build_rtu_request(slave_addr: int, start_reg: int, reg_count: int, func_code
 def parse_rtu_response(response_bytes: bytes) -> dict:
     response = list(response_bytes)
     if len(response) < 4:
-        return {"error": "响应帧过短"}
+        return {"error": "Response frame too short"}
 
     slave_addr = response[0]
     func_code = response[1]
@@ -50,11 +50,11 @@ def parse_rtu_response(response_bytes: bytes) -> dict:
 
     calculated_crc = modbus_crc(response[:-2])
     if received_crc != calculated_crc:
-        return {"error": f"CRC校验失败"}
+        return {"error": "CRC check failed"}
 
     if func_code in [0x03, 0x04]:
         if len(data) < 1:
-            return {"error": f"功能码{func_code:02X}响应数据为空"}
+            return {"error": f"Function code {func_code:02X} response data is empty"}
         byte_count = data[0]
         registers = []
         for i in range(1, len(data), 2):
@@ -69,12 +69,12 @@ def parse_rtu_response(response_bytes: bytes) -> dict:
             "valid": True
         }
     else:
-        return {"error": f"不支持的功能码：0x{func_code:02X}"}
+        return {"error": f"Unsupported function code: 0x{func_code:02X}"}
 
 
 class WindSpeedPlotter:
     def __init__(self):
-        # 设备参数
+        # Device parameters
         self.DEVICE_IP = "192.168.0.101"
         self.DEVICE_PORT = 8234
         self.SLAVE_ADDR = 1
@@ -84,77 +84,78 @@ class WindSpeedPlotter:
         self.TIMEOUT = 5
         self.BUFFER_SIZE = 1024
 
-        # 数据存储 - 使用deque固定大小，自动删除旧数据
-        self.max_points = 100  # 显示最近100个数据点
-        self.time_data = deque(maxlen=self.max_points)
+        # Data storage - using deque with unlimited size to prevent data loss
+        self.max_points = 2000  # Store more data points to prevent disappearance
+        self.time_data = deque()
 
-        # 原始风速数据
+        # Raw wind speed data
         self.wind_raw_data = [
-            deque(maxlen=self.max_points),  # 风速1
-            deque(maxlen=self.max_points),  # 风速2
-            deque(maxlen=self.max_points),  # 风速3
-            deque(maxlen=self.max_points)   # 风速4
+            deque(),  # Wind speed 1
+            deque(),  # Wind speed 2
+            deque(),  # Wind speed 3
+            deque()   # Wind speed 4
         ]
 
-        # 滤波后风速数据
+        # Filtered wind speed data
         self.wind_filtered_data = [
-            deque(maxlen=self.max_points),  # 风速1
-            deque(maxlen=self.max_points),  # 风速2
-            deque(maxlen=self.max_points),  # 风速3
-            deque(maxlen=self.max_points)   # 风速4
+            deque(),  # Wind speed 1
+            deque(),  # Wind speed 2
+            deque(),  # Wind speed 3
+            deque()   # Wind speed 4
         ]
 
-        # 卡尔曼滤波器
+        # Kalman filters
         self.wind_filters = [create_wind_speed_filter() for _ in range(4)]
 
-        # 连接对象
+        # Connection object
         self.sock: Optional[socket.socket] = None
         self.connected = False
 
-        # 统计信息
+        # Statistics
         self.read_count = 0
         self.success_count = 0
         self.fail_count = 0
         self.start_time = time.time()
 
-        # 设置matplotlib
-        plt.style.use('seaborn-v0_8-darkgrid')
+        # Setup matplotlib
+        plt.style.use('default')
         self.fig, self.axes = plt.subplots(2, 2, figsize=(14, 10))
-        self.fig.suptitle('风速实时监测（原始值 vs 卡尔曼滤波值）', fontsize=16, fontweight='bold')
+        self.fig.suptitle('Real-time Wind Speed Monitoring (Raw vs Kalman Filtered)',
+                         fontsize=16, fontweight='bold')
 
-        # 调整子图间距
+        # Adjust subplot spacing
         plt.subplots_adjust(hspace=0.3, wspace=0.25)
 
-        # 初始化4个子图
+        # Initialize 4 subplots
         self.lines_raw = []
         self.lines_filtered = []
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
 
         for i, ax in enumerate(self.axes.flat):
-            # 设置标题和标签
-            ax.set_title(f'风速传感器 {i+1}', fontsize=12)
-            ax.set_xlabel('时间 (秒)', fontsize=10)
-            ax.set_ylabel('风速 (m/s)', fontsize=10)
+            # Set title and labels
+            ax.set_title(f'Wind Speed Sensor {i+1}', fontsize=12)
+            ax.set_xlabel('Time (seconds)', fontsize=10)
+            ax.set_ylabel('Wind Speed (m/s)', fontsize=10)
             ax.grid(True, alpha=0.3)
 
-            # 创建线条对象
-            line_raw, = ax.plot([], [], color=colors[i], alpha=0.5, linewidth=1, label='原始值')
-            line_filtered, = ax.plot([], [], color=colors[i], linewidth=2, label='滤波值')
+            # Create line objects
+            line_raw, = ax.plot([], [], color=colors[i], alpha=0.5, linewidth=1, label='Raw')
+            line_filtered, = ax.plot([], [], color=colors[i], linewidth=2, label='Filtered')
 
             self.lines_raw.append(line_raw)
             self.lines_filtered.append(line_filtered)
 
-            # 添加图例
+            # Add legend
             ax.legend(loc='upper right')
 
-            # 设置y轴范围
-            ax.set_ylim(-1, 20)
+            # Set y-axis range
+            ax.set_ylim(-1, 25)
 
-        # 启动连接
+        # Start connection
         self.connect_device()
 
     def connect_device(self) -> bool:
-        """连接设备"""
+        """Connect to device"""
         try:
             if self.sock:
                 self.sock.close()
@@ -163,20 +164,20 @@ class WindSpeedPlotter:
             self.sock.settimeout(self.TIMEOUT)
             self.sock.connect((self.DEVICE_IP, self.DEVICE_PORT))
             self.connected = True
-            print(f"✅ 成功连接到设备 {self.DEVICE_IP}:{self.DEVICE_PORT}")
+            print(f"Successfully connected to device {self.DEVICE_IP}:{self.DEVICE_PORT}")
             return True
         except Exception as e:
-            print(f"❌ 连接失败: {str(e)}")
+            print(f"Connection failed: {str(e)}")
             self.connected = False
             return False
 
     def read_wind_data(self):
-        """读取风速数据"""
+        """Read wind speed data"""
         if not self.connected or not self.sock:
             return None
 
         try:
-            # 构建请求
+            # Build request
             request = build_rtu_request(
                 slave_addr=self.SLAVE_ADDR,
                 start_reg=self.START_REG,
@@ -184,10 +185,10 @@ class WindSpeedPlotter:
                 func_code=self.FUNC_CODE
             )
 
-            # 发送请求
+            # Send request
             self.sock.sendall(request)
 
-            # 接收响应
+            # Receive response
             response_bytes = b""
             request_start_time = time.time()
 
@@ -202,28 +203,28 @@ class WindSpeedPlotter:
                             break
 
                 if time.time() - request_start_time > self.TIMEOUT:
-                    raise socket.timeout(f"接收超时")
+                    raise socket.timeout("Receive timeout")
                 time.sleep(0.01)
 
-            # 解析响应
+            # Parse response
             parsed_data = parse_rtu_response(response_bytes)
             if "error" in parsed_data:
-                print(f"⚠️ 解析失败: {parsed_data['error']}")
+                print(f"Parse failed: {parsed_data['error']}")
                 return None
 
             registers = parsed_data["registers"]
             if len(registers) < self.REG_COUNT:
-                print(f"⚠️ 数据不足：需要{self.REG_COUNT}个，收到{len(registers)}个")
+                print(f"Insufficient data: need {self.REG_COUNT}, got {len(registers)}")
                 return None
 
-            # 提取风速数据（寄存器4-7）
+            # Extract wind speed data (registers 4-7)
             wind_speeds = []
             for i in range(4, 8):
                 raw_value = registers[i]
-                current_value = raw_value / 249  # 转换为电流值(mA)
-                wind_speed_raw = (current_value - 4) * 30 / 16  # 转换为风速(m/s)
+                current_value = raw_value / 249  # Convert to current (mA)
+                wind_speed_raw = (current_value - 4) * 30 / 16  # Convert to wind speed (m/s)
 
-                # 应用卡尔曼滤波
+                # Apply Kalman filter
                 wind_speed_filtered = self.wind_filters[i-4].update(wind_speed_raw)
 
                 wind_speeds.append((wind_speed_raw, wind_speed_filtered))
@@ -231,67 +232,79 @@ class WindSpeedPlotter:
             return wind_speeds
 
         except Exception as e:
-            print(f"❌ 读取失败: {str(e)}")
-            # 尝试重连
+            print(f"Read failed: {str(e)}")
+            # Try to reconnect
             if "Connection" in str(e) or "reset" in str(e):
                 self.connected = False
                 self.connect_device()
             return None
 
     def update(self, frame):
-        """更新数据"""
+        """Update data"""
         current_time = time.time() - self.start_time
 
-        # 读取数据
+        # Read data
         wind_data = self.read_wind_data()
 
         if wind_data:
             self.read_count += 1
             self.success_count += 1
 
-            # 添加时间戳
+            # Add timestamp
             self.time_data.append(current_time)
 
-            # 更新数据
+            # Update data
             for i, (raw_val, filtered_val) in enumerate(wind_data):
                 self.wind_raw_data[i].append(raw_val)
                 self.wind_filtered_data[i].append(filtered_val)
 
-            # 更新图表
+            # Update plots
             for i in range(4):
                 if len(self.time_data) > 0:
-                    # 更新原始数据线
+                    # Update raw data line
                     self.lines_raw[i].set_data(self.time_data, self.wind_raw_data[i])
-                    # 更新滤波数据线
+                    # Update filtered data line
                     self.lines_filtered[i].set_data(self.time_data, self.wind_filtered_data[i])
 
-                    # 动态调整x轴范围
-                    if current_time > 30:  # 如果超过30秒，只显示最近30秒
-                        self.axes.flat[i].set_xlim(current_time - 30, current_time)
+                    # Dynamic x-axis adjustment - show all data or last 60 seconds
+                    if current_time > 60 and len(self.time_data) > 100:
+                        # Show last 60 seconds
+                        self.axes.flat[i].set_xlim(current_time - 60, current_time)
                     else:
-                        self.axes.flat[i].set_xlim(0, 30)
+                        # Show all data
+                        self.axes.flat[i].set_xlim(0, max(60, current_time))
 
-                    # 动态调整y轴范围
-                    if len(self.wind_raw_data[i]) > 0:
-                        all_data = list(self.wind_raw_data[i]) + list(self.wind_filtered_data[i])
-                        y_min = min(all_data) - 1
-                        y_max = max(all_data) + 1
-                        if y_min < 0: y_min = 0
-                        if y_max > 25: y_max = 25
-                        self.axes.flat[i].set_ylim(y_min, y_max)
+                    # Dynamic y-axis adjustment
+                    if len(self.wind_raw_data[i]) > 0 and len(self.wind_filtered_data[i]) > 0:
+                        # Get data from visible range
+                        if current_time > 60 and len(self.time_data) > 100:
+                            # Only consider last 60 seconds for y-axis range
+                            visible_start = max(0, len(self.time_data) - 600)  # Approximate last 60 seconds at 10Hz
+                            visible_raw = list(self.wind_raw_data[i])[visible_start:]
+                            visible_filtered = list(self.wind_filtered_data[i])[visible_start:]
+                        else:
+                            visible_raw = list(self.wind_raw_data[i])
+                            visible_filtered = list(self.wind_filtered_data[i])
 
-            # 更新成功信息
+                        if visible_raw and visible_filtered:
+                            all_data = visible_raw + visible_filtered
+                            y_min = min(all_data) - 1
+                            y_max = max(all_data) + 1
+                            if y_min < 0: y_min = 0
+                            if y_max > 30: y_max = 30
+                            self.axes.flat[i].set_ylim(y_min, y_max)
+
+            # Update success information
             success_rate = self.success_count / self.read_count * 100 if self.read_count > 0 else 0
             self.fig.suptitle(
-                f'风速实时监测 | 成功率: {success_rate:.1f}% | '
-                f'读取次数: {self.read_count} | '
-                f'运行时间: {current_time:.0f}秒',
+                f'Real-time Wind Speed Monitoring | Success Rate: {success_rate:.1f}% | '
+                f'Reads: {self.read_count} | Runtime: {current_time:.0f}s',
                 fontsize=14, fontweight='bold'
             )
 
-            # 打印最新数据
-            print(f"\r时间: {current_time:6.1f}s | "
-                  f"风速: {wind_data[0][1]:5.2f} | {wind_data[1][1]:5.2f} | "
+            # Print latest data
+            print(f"\rTime: {current_time:6.1f}s | "
+                  f"Wind: {wind_data[0][1]:5.2f} | {wind_data[1][1]:5.2f} | "
                   f"{wind_data[2][1]:5.2f} | {wind_data[3][1]:5.2f} m/s", end='')
         else:
             self.read_count += 1
@@ -300,42 +313,44 @@ class WindSpeedPlotter:
         return self.lines_raw + self.lines_filtered
 
     def start(self):
-        """启动实时绘图"""
+        """Start real-time plotting"""
         print("\n" + "="*60)
-        print("风速实时监测系统")
+        print("Real-time Wind Speed Monitoring System")
         print("="*60)
-        print(f"设备地址: {self.DEVICE_IP}:{self.DEVICE_PORT}")
-        print(f"显示内容: 4个风速传感器的原始值和卡尔曼滤波值")
-        print(f"数据点数: 显示最近{self.max_points}个数据点")
-        print("按 Ctrl+C 停止程序")
+        print(f"Device address: {self.DEVICE_IP}:{self.DEVICE_PORT}")
+        print(f"Display: Raw and Kalman filtered values from 4 wind speed sensors")
+        print(f"Data points: All data stored (no automatic deletion)")
+        print(f"Time window: Shows last 60 seconds of data")
+        print("Press Ctrl+C to stop")
         print("="*60)
 
-        # 创建动画
+        # Create animation
         self.ani = FuncAnimation(
-            self.fig, self.update, interval=100,  # 100ms更新一次
+            self.fig, self.update, interval=100,  # Update every 100ms
             blit=True, cache_frame_data=False
         )
 
         try:
             plt.show()
         except KeyboardInterrupt:
-            print("\n\n⚠️ 用户中断，正在停止...")
+            print("\n\nUser interrupt, stopping...")
         finally:
             if self.sock:
                 self.sock.close()
 
-            # 打印统计报告
+            # Print statistics
             total_runtime = time.time() - self.start_time
             success_rate = self.success_count / self.read_count * 100 if self.read_count > 0 else 0
 
             print("\n" + "="*60)
-            print("统计报告")
+            print("Statistics Report")
             print("="*60)
-            print(f"总运行时间: {total_runtime:.1f} 秒")
-            print(f"总读取次数: {self.read_count}")
-            print(f"成功次数: {self.success_count}")
-            print(f"失败次数: {self.fail_count}")
-            print(f"成功率: {success_rate:.1f}%")
+            print(f"Total runtime: {total_runtime:.1f} seconds")
+            print(f"Total reads: {self.read_count}")
+            print(f"Successful reads: {self.success_count}")
+            print(f"Failed reads: {self.fail_count}")
+            print(f"Success rate: {success_rate:.1f}%")
+            print(f"Data points stored: {len(self.time_data)}")
             print("="*60)
 
 
