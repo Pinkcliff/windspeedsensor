@@ -248,6 +248,8 @@ class WindSpeedPlotter:
 
     def update(self, frame):
         """Update data"""
+        # Track frame count
+        self.frame_count = getattr(self, 'frame_count', 0) + 1
         current_time = time.time() - self.start_time
 
         # Read data
@@ -304,11 +306,31 @@ class WindSpeedPlotter:
                             if y_min < 0: y_min = 0
                             if y_max > 30: y_max = 30
 
-                            # Force y-axis update
-                            self.axes.flat[i].set_ylim(y_min, y_max)
-                            # Force redraw of the axis
-                            self.axes.flat[i].relim()
-                            self.axes.flat[i].autoscale_view(scalex=False, scaley=True)
+                            # IMPORTANT: Disable autoscale before setting limits
+                            self.axes.flat[i].set_autoscale_on(False)
+
+                            # Force y-axis update with multiple approaches
+                            ax = self.axes.flat[i]
+
+                            # Disable autoscale
+                            ax.set_autoscale_on(False)
+
+                            # Clear and redraw the axis (more drastic approach)
+                            # ax.clear()
+                            # ax.relim()
+
+                            # Set the limits multiple ways
+                            ax.set_ylim(y_min, y_max)
+                            ax.set_ybound(lower=y_min, upper=y_max)
+
+                            # Force the figure to redraw
+                            if self.frame_count % 10 == 0:  # Every 10 frames
+                                self.fig.canvas.draw_idle()
+                                self.fig.canvas.flush_events()
+
+                            # Debug print
+                            if i == 0 and self.frame_count % 20 == 0:  # Less frequent printing
+                                print(f"\n[Frame {self.frame_count}] Y-axis Sensor {i+1}: [{y_min:.2f}, {y_max:.2f}]", end='')
 
                         # Update current value text
                         if recent_raw and recent_filtered:
@@ -350,10 +372,13 @@ class WindSpeedPlotter:
         print("Press Ctrl+C to stop")
         print("="*60)
 
+        # Disable matplotlib's interactive mode to force updates
+        plt.ioff()  # Turn off interactive mode
+
         # Create animation
         self.ani = FuncAnimation(
             self.fig, self.update, interval=100,  # Update every 100ms
-            blit=True, cache_frame_data=False
+            blit=False, cache_frame_data=False, repeat=True
         )
 
         try:
