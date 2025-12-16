@@ -164,13 +164,24 @@ def single_connect_continuous_read():
                         time.sleep(READ_INTERVAL)
                         continue
 
-                # 发送请求
+                # 构建请求
                 request = build_rtu_request(
                     slave_addr=SLAVE_ADDR,
                     start_reg=START_REG,
                     reg_count=REG_COUNT,
                     func_code=FUNC_CODE
                 )
+
+                # 输出发送数据（用于调试）
+                print(f"\n[{current_time}] 📤 发送的Modbus请求: {request.hex(' ').upper()}")
+                print(f"  请求长度: {len(request)} 字节")
+                print(f"  从站地址: {request[0]:02X}")
+                print(f"  功能码: {request[1]:02X}")
+                print(f"  起始寄存器: {(request[2] << 8) | request[3]:04X}")
+                print(f"  寄存器数量: {(request[4] << 8) | request[5]:04X}")
+                print(f"  CRC校验: {request[6]:02X} {request[7]:02X}")
+
+                # 发送请求
                 sock.sendall(request)
 
                 # 接收响应
