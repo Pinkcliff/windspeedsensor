@@ -258,12 +258,13 @@ def single_connect_continuous_read():
                 sensor_data = sensor_data_converted + wind_speeds
 
                 # 使用AIR类计算空气密度
-                # 使用第1路的温度和第2路的压力（转换为kPa）
+                # 使用第1路的温度和第2路的压力
                 # 注意：pressure已经是kPa单位，temperature是摄氏度
                 # 冬天假设相对湿度为40%
                 try:
                     # 创建AIR对象 - 使用温度和压力
-                    air = AIR(dP=pressure + 101.325, unit='c', dTdb=temperature, dRh=0.4)  # dP是总压力，需要加上大气压，湿度40%
+                    # pressure是绝对压力，直接使用
+                    air = AIR(dP=pressure, unit='c', dTdb=temperature, dRh=0.4)  # 湿度40%
                     air.updateData()
                     prop = air.getProp(unit='c')
                     air_density = prop['Density(kg/m3)']
