@@ -1,6 +1,7 @@
 import socket
 import time
 from typing import List, Dict, Optional
+from Refrigerant import AIR
 
 
 # --------------------------
@@ -86,6 +87,7 @@ def single_connect_continuous_read():
 
     # 2. 全局变量
     last_registers: List[int] = []  # 存储上一次读取的所有寄存器值
+    last_air_density: float = 0.0  # 存储上一次的空气密度
     read_count = 0               # 总读取次数
     success_count = 0            # 成功次数
     fail_count = 0               # 失败次数
@@ -104,9 +106,10 @@ def single_connect_continuous_read():
     print(f"📡 设备地址: {DEVICE_IP}:{DEVICE_PORT}")
     print(f"🔌 从站地址: {SLAVE_ADDR} | 功能码: 0x{FUNC_CODE:02X}")
     print(f"📝 读取范围: 寄存器{START_REG}~{START_REG+REG_COUNT-1}（共{REG_COUNT}个）")
-    print(f"📊 显示内容: 第1路温度 | 第2路压力 | 第5-8路风速传感器")
+    print(f"📊 显示内容: 第1路温度 | 第2路压力 | 空气密度 | 第5-8路风速传感器")
     print(f"🌡️  温度计算: (电流值-4mA) × 7.5 - 40 = 温度(℃) [量程: -40~80℃]")
     print(f"🔧 压力计算: (电流值-4mA) × 7.5 = 压力(kPa) [量程: 0~120kPa]")
+    print(f"💨 空气密度: 基于温度、压力和相对湿度(50%)计算得出")
     print(f"🌬️  风速计算: (电流值-4mA) × 30 ÷ 16 = 风速(m/s)")
     print(f"⏱️  读取间隔: {READ_INTERVAL}秒 | 超时时间: {TIMEOUT}秒")
     print(f"🔍 数据变化将以 {RED}红色{RESET} 高亮显示")
@@ -254,6 +257,20 @@ def single_connect_continuous_read():
                 # 合并所有传感器数据
                 sensor_data = sensor_data_converted + wind_speeds
 
+                # 使用AIR类计算空气密度
+                # 使用第1路的温度和第2路的压力（转换为kPa）
+                # 注意：pressure已经是kPa单位，temperature是摄氏度
+                # 假设相对湿度为50%（如果没有湿度传感器）
+                try:
+                    # 创建AIR对象 - 使用温度和压力
+                    air = AIR(dP=pressure + 101.325, unit='c', dTdb=temperature, dRh=0.5)  # dP是总压力，需要加上大气压
+                    air.updateData()
+                    prop = air.getProp(unit='c')
+                    air_density = prop['Density(kg/m3)']
+                except Exception as e:
+                    print(f"[{current_time}] ⚠️ 空气密度计算失败: {str(e)}")
+                    air_density = 0.0
+
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
 
                 # 高亮变化数据
@@ -307,10 +324,20 @@ def single_connect_continuous_read():
                     wind_strs = [f"{wind:5.1f}m/s" for wind in wind_speeds]
                     wind_raw_strs = [f"{registers[4+i]:4d}" for i in range(4)]
 
+                # 检查空气密度变化并高亮显示
+                if last_air_density > 0:
+                    if abs(air_density - last_air_density) > 0.01:
+                        density_str = f"{RED}{air_density:5.2f}kg/m³{RESET}"
+                    else:
+                        density_str = f"{air_density:5.2f}kg/m³"
+                else:
+                    density_str = f"{air_density:5.2f}kg/m³"
+
                 # 打印结果 - 显示所有传感器数据
                 output_line = f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
                 output_line += f"温度:{temp_raw_str}→{temp_str} | "
                 output_line += f"压力:{pressure_raw_str}→{pressure_str} | "
+                output_line += f"空气密度:{density_str} | "
                 output_line += f"风速:{wind_raw_strs[0]}→{wind_strs[0]} | "
                 output_line += f"{wind_raw_strs[1]}→{wind_strs[1]} | "
                 output_line += f"{wind_raw_strs[2]}→{wind_strs[2]} | "
@@ -320,6 +347,7 @@ def single_connect_continuous_read():
 
                 # 更新记录
                 last_registers = registers.copy()
+                last_air_density = air_density
                 success_count += 1
                 read_success = True
 
