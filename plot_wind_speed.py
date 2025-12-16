@@ -11,6 +11,9 @@ from matplotlib.animation import FuncAnimation
 from collections import deque
 from kalman_filter import create_wind_speed_filter
 from typing import List, Optional
+import csv
+import os
+from datetime import datetime
 
 # Modbus RTU frame processing functions
 def modbus_crc(data: List[int]) -> List[int]:
@@ -117,6 +120,9 @@ class WindSpeedPlotter:
         self.fail_count = 0
         self.start_time = time.time()
 
+        # Data file setup
+        self.setup_data_file()
+
         # Setup matplotlib
         plt.style.use('default')
         self.fig, self.axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -160,6 +166,77 @@ class WindSpeedPlotter:
 
         # Start connection
         self.connect_device()
+
+    def setup_data_file(self):
+        """Setup data file for saving wind speed data"""
+        # Create data directory if it doesn't exist
+        self.data_dir = "wind_data"
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+            print(f"Created directory: {self.data_dir}")
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.data_filename = os.path.join(self.data_dir, f"{timestamp}_wind_data.csv")
+
+        # Open file and write header
+        self.data_file = open(self.data_filename, 'w', newline='')
+        self.csv_writer = csv.writer(self.data_file)
+
+        # Write header
+        header = [
+            'Timestamp', 'Time_Elapsed_s',
+            'Wind1_Raw', 'Wind1_Filtered',
+            'Wind2_Raw', 'Wind2_Filtered',
+            'Wind3_Raw', 'Wind3_Filtered',
+            'Wind4_Raw', 'Wind4_Filtered',
+            'Temperature', 'Pressure', 'Air_Density',
+            'Success_Flag'
+        ]
+        self.csv_writer.writerow(header)
+        self.data_file.flush()
+
+        print(f"Data will be saved to: {self.data_filename}")
+
+    def save_data_to_file(self, wind_data, temperature=None, pressure=None, air_density=None, success=True):
+        """Save wind speed data to CSV file"""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]  # Milliseconds
+            time_elapsed = time.time() - self.start_time
+
+            row = [timestamp, time_elapsed]
+
+            # Add wind data
+            if wind_data:
+                for i, (raw_val, filtered_val) in enumerate(wind_data):
+                    row.extend([raw_val, filtered_val])
+            else:
+                # No data - fill with empty values
+                row.extend([''] * 8)  # 4 sensors * 2 values each
+
+            # Add temperature and pressure if available
+            row.extend([
+                temperature if temperature is not None else '',
+                pressure if pressure is not None else '',
+                air_density if air_density is not None else ''
+            ])
+
+            # Add success flag
+            row.append('1' if success else '0')
+
+            # Write to file
+            self.csv_writer.writerow(row)
+            self.data_file.flush()
+
+        except Exception as e:
+            print(f"Error saving data: {e}")
+
+    def close_data_file(self):
+        """Close the data file"""
+        if hasattr(self, 'data_file') and self.data_file:
+            self.data_file.close()
+            print(f"\nData file closed: {self.data_filename}")
+            print(f"Total data points saved: {self.read_count}")
 
     def connect_device(self) -> bool:
         """Connect to device"""
@@ -236,7 +313,28 @@ class WindSpeedPlotter:
 
                 wind_speeds.append((wind_speed_raw, wind_speed_filtered))
 
-            return wind_speeds
+            # Extract temperature and pressure for logging
+            # Temperature (register 0)
+            temp_raw = registers[0]
+            temp_current = temp_raw / 249
+            temperature = (temp_current - 4) * 7.5 - 40
+
+            # Pressure (register 1)
+            pressure_raw = registers[1]
+            pressure_current = pressure_raw / 249
+            pressure = (pressure_current - 4) * 7.5
+
+            # Calculate air density
+            try:
+                from Refrigerant import AIR
+                air = AIR(dP=pressure, unit='c', dTdb=temperature, dRh=0.4)
+                air.updateData()
+                prop = air.getProp(unit='c')
+                air_density = prop['Density(kg/m3)']
+            except:
+                air_density = None
+
+            return wind_speeds, temperature, pressure, air_density
 
         except Exception as e:
             print(f"Read failed: {str(e)}")
@@ -253,23 +351,42 @@ class WindSpeedPlotter:
         current_time = time.time() - self.start_time
 
         # Read data
-        wind_data = self.read_wind_data()
+        data_result = self.read_wind_data()
 
-        if wind_data:
+        if data_result:
             self.read_count += 1
             self.success_count += 1
+
+            # Unpack data (wind_speeds, temperature, pressure, air_density)
+            wind_speeds = data_result[0]
+            temperature = data_result[1] if len(data_result) > 1 else None
+            pressure = data_result[2] if len(data_result) > 2 else None
+            air_density = data_result[3] if len(data_result) > 3 else None
+
+            # Save data to file
+            self.save_data_to_file(wind_speeds, temperature, pressure, air_density, success=True)
 
             # Add timestamp
             self.time_data.append(current_time)
 
             # Update data
-            for i, (raw_val, filtered_val) in enumerate(wind_data):
+            for i, (raw_val, filtered_val) in enumerate(wind_speeds):
                 self.wind_raw_data[i].append(raw_val)
                 self.wind_filtered_data[i].append(filtered_val)
 
-            # Update plots
-            for i in range(4):
-                if len(self.time_data) > 0:
+            # For display purposes, use wind_speeds
+            wind_data = wind_speeds
+        else:
+            self.read_count += 1
+            self.fail_count += 1
+
+            # Save failed read attempt
+            self.save_data_to_file(None, success=False)
+            wind_data = None
+
+        # Update plots
+        for i in range(4):
+            if len(self.time_data) > 0 and wind_data:
                     # Update raw data line
                     self.lines_raw[i].set_data(self.time_data, self.wind_raw_data[i])
                     # Update filtered data line
@@ -386,6 +503,10 @@ class WindSpeedPlotter:
         except KeyboardInterrupt:
             print("\n\nUser interrupt, stopping...")
         finally:
+            # Close data file
+            self.close_data_file()
+
+            # Close socket connection
             if self.sock:
                 self.sock.close()
 
