@@ -78,7 +78,7 @@ def single_connect_continuous_read():
     SLAVE_ADDR = 1               # 设备从站地址
     FUNC_CODE = 0x04             # 功能码（0x03=保持寄存器，0x04=输入寄存器）
     START_REG = 0                # 起始寄存器地址
-    REG_COUNT = 10                # 读取寄存器数量
+    REG_COUNT = 8                # 读取寄存器数量
     READ_INTERVAL = 0.1            # 读取间隔（秒）
     TIMEOUT = 5                  # 单次读写超时时间
     BUFFER_SIZE = 1024
@@ -238,9 +238,10 @@ def single_connect_continuous_read():
                 # 提取并转换第5-8路数据（风速传感器）
                 for i in range(4, 8):  # 索引4-7对应第5-8路传感器
                     raw_value = registers[i]
+                    # 将原始值转换为电流值(mA): raw_value / 249
+                    current_value = raw_value / 249
                     # 风速计算公式: (当前电流值 - 4mA) * 30 / 16 = 风速值(m/s)
-                    # raw_value已经是电流值(mA)
-                    wind_speed = (raw_value - 4) * 30 / 16
+                    wind_speed = (current_value - 4) * 30 / 16
                     sensor_data.append(wind_speed)
                     sensor_data_converted.append(wind_speed)
                     sensor_data_raw.append(raw_value)
@@ -250,7 +251,8 @@ def single_connect_continuous_read():
                 # 输出所有寄存器的原始值（用于调试）
                 print(f"\n[{current_time}] 📊 原始寄存器值:")
                 for i, reg in enumerate(registers):
-                    print(f"  寄存器{i}: {reg:5d}")
+                    current = reg / 249
+                    print(f"  寄存器{i}: {reg:5d} → {current:6.3f}mA")
                 print()
 
                 # 高亮变化数据
@@ -264,8 +266,8 @@ def single_connect_continuous_read():
                         # 检查与上一次的差异
                         if len(last_registers) > 4 + i:
                             # 计算上一次的风速值
-                            # last_registers[4+i]已经是电流值(mA)
-                            last_value = (last_registers[4 + i] - 4) * 30 / 16
+                            last_current = last_registers[4 + i] / 249  # 转换为电流值
+                            last_value = (last_current - 4) * 30 / 16  # 计算风速
                             if abs(value - last_value) > 0.1:
                                 # 数据有变化，使用红色高亮
                                 display_str = f"{RED}{value:5.1f}m/s{RESET}"
