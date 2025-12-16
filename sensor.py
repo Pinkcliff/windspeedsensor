@@ -2,6 +2,7 @@ import socket
 import time
 from typing import List, Dict, Optional
 from Refrigerant import AIR
+from kalman_filter import create_wind_speed_filter
 
 
 # --------------------------
@@ -94,7 +95,10 @@ def single_connect_continuous_read():
     sock: Optional[socket.socket] = None  # 连接对象
     start_time = time.time()     # 程序开始时间
 
-    # 3. 颜色编码
+    # 3. 卡尔曼滤波器初始化 - 仅对风速进行滤波
+    wind_filters = [create_wind_speed_filter() for _ in range(4)]  # 4个风速滤波器
+
+    # 4. 颜色编码
     RED = "\033[91m"
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
@@ -107,6 +111,7 @@ def single_connect_continuous_read():
     print(f"🔌 从站地址: {SLAVE_ADDR} | 功能码: 0x{FUNC_CODE:02X}")
     print(f"📝 读取范围: 寄存器{START_REG}~{START_REG+REG_COUNT-1}（共{REG_COUNT}个）")
     print(f"📊 显示内容: 第1路温度 | 第2路压力 | 空气密度 | 第5-8路风速传感器")
+    print(f"💡 显示格式: 温度/压力(原始值) | 风速(原始值→滤波值) | 仅风速应用卡尔曼滤波")
     print(f"🌡️  温度计算: (电流值-4mA) × 7.5 - 40 = 温度(℃) [量程: -40~80℃]")
     print(f"🔧 压力计算: (电流值-4mA) × 7.5 = 压力(kPa) [量程: 0~120kPa]")
     print(f"💨 空气密度: 基于温度、压力和相对湿度(40%)计算得出")
@@ -114,10 +119,11 @@ def single_connect_continuous_read():
     print(f"⏱️  读取间隔: {READ_INTERVAL}秒 | 超时时间: {TIMEOUT}秒")
     print(f"🔍 数据变化将以 {RED}红色{RESET} 高亮显示")
     print(f"🔄 连接断开后自动重连（{RECONNECT_ATTEMPT}次）")
+    print(f"📊 启用卡尔曼滤波以稳定数据")
     print("⛔ 按 Ctrl+C 停止读取")
     print("="*80)
 
-    # 4. 连接函数（独立封装，方便重连）
+    # 5. 连接函数（独立封装，方便重连）
     def connect_device() -> bool:
         """建立设备连接"""
         nonlocal sock
@@ -145,7 +151,7 @@ def single_connect_continuous_read():
             print(f"{RED}❌ 连接失败: 未知错误 - {str(e)}{RESET}")
         return False
 
-    # 5. 首次连接
+    # 6. 首次连接
     print(f"\n📞 正在连接设备 {DEVICE_IP}:{DEVICE_PORT}...")
     if not connect_device():
         print(f"{YELLOW}⚠️  连接失败，程序退出{RESET}")
@@ -153,7 +159,7 @@ def single_connect_continuous_read():
 
     print("-"*80)
 
-    # 6. 持续读取循环
+    # 7. 持续读取循环
     try:
         while True:
             read_count += 1
@@ -226,7 +232,7 @@ def single_connect_continuous_read():
                 sensor_data_converted = []
                 sensor_data_raw = []
 
-                # 第1路：温度传感器
+                # 第1路：温度传感器（不滤波）
                 raw_value = registers[0]
                 current_value = raw_value / 249  # 转换为电流值(mA)
                 # 温度计算公式: (电流值 - 4mA) × 7.5 - 40 = 温度(℃)
@@ -235,7 +241,7 @@ def single_connect_continuous_read():
                 sensor_data_converted.append(temperature)
                 sensor_data_raw.append(raw_value)
 
-                # 第2路：压力传感器
+                # 第2路：压力传感器（不滤波）
                 raw_value = registers[1]
                 current_value = raw_value / 249  # 转换为电流值(mA)
                 # 压力计算公式: (电流值 - 4mA) × 7.5 = 压力(kPa)
@@ -244,15 +250,19 @@ def single_connect_continuous_read():
                 sensor_data_converted.append(pressure)
                 sensor_data_raw.append(raw_value)
 
-                # 第5-8路：风速传感器
+                # 第5-8路：风速传感器（应用卡尔曼滤波）
                 wind_speeds = []
+                wind_speeds_raw = []
                 for i in range(4, 8):  # 索引4-7对应第5-8路传感器
                     raw_value = registers[i]
                     # 将原始值转换为电流值(mA): raw_value / 249
                     current_value = raw_value / 249
                     # 风速计算公式: (当前电流值 - 4mA) * 30 / 16 = 风速值(m/s)
-                    wind_speed = (current_value - 4) * 30 / 16
+                    wind_speed_raw = (current_value - 4) * 30 / 16
+                    # 应用卡尔曼滤波
+                    wind_speed = wind_filters[i-4].update(wind_speed_raw)
                     wind_speeds.append(wind_speed)
+                    wind_speeds_raw.append(wind_speed_raw)
 
                 # 合并所有传感器数据
                 sensor_data = sensor_data_converted + wind_speeds
@@ -290,7 +300,7 @@ def single_connect_continuous_read():
                         last_wind = (last_current - 4) * 30 / 16
                         last_winds.append(last_wind)
 
-                    # 温度显示
+                    # 温度显示（不滤波）
                     if abs(temperature - last_temp) > 0.1:
                         temp_str = f"{RED}{temperature:5.1f}℃{RESET}"
                         temp_raw_str = f"{RED}{registers[0]:4d}{RESET}"
@@ -298,7 +308,7 @@ def single_connect_continuous_read():
                         temp_str = f"{temperature:5.1f}℃"
                         temp_raw_str = f"{registers[0]:4d}"
 
-                    # 压力显示
+                    # 压力显示（不滤波）
                     if abs(pressure - last_pressure) > 0.1:
                         pressure_str = f"{RED}{pressure:5.1f}kPa{RESET}"
                         pressure_raw_str = f"{RED}{registers[1]:4d}{RESET}"
@@ -306,15 +316,15 @@ def single_connect_continuous_read():
                         pressure_str = f"{pressure:5.1f}kPa"
                         pressure_raw_str = f"{registers[1]:4d}"
 
-                    # 风速显示
+                    # 风速显示（显示原始值→滤波值）
                     wind_strs = []
                     wind_raw_strs = []
                     for i, wind in enumerate(wind_speeds):
                         if abs(wind - last_winds[i]) > 0.1:
-                            wind_strs.append(f"{RED}{wind:5.1f}m/s{RESET}")
+                            wind_strs.append(f"{RED}{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s{RESET}")
                             wind_raw_strs.append(f"{RED}{registers[4+i]:4d}{RESET}")
                         else:
-                            wind_strs.append(f"{wind:5.1f}m/s")
+                            wind_strs.append(f"{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s")
                             wind_raw_strs.append(f"{registers[4+i]:4d}")
                 else:
                     # 第一次读取，没有历史数据对比
@@ -322,7 +332,7 @@ def single_connect_continuous_read():
                     temp_raw_str = f"{registers[0]:4d}"
                     pressure_str = f"{pressure:5.1f}kPa"
                     pressure_raw_str = f"{registers[1]:4d}"
-                    wind_strs = [f"{wind:5.1f}m/s" for wind in wind_speeds]
+                    wind_strs = [f"{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s" for i, wind in enumerate(wind_speeds)]
                     wind_raw_strs = [f"{registers[4+i]:4d}" for i in range(4)]
 
                 # 检查空气密度变化并高亮显示
@@ -334,15 +344,12 @@ def single_connect_continuous_read():
                 else:
                     density_str = f"{air_density:5.2f}kg/m³"
 
-                # 打印结果 - 显示所有传感器数据
+                # 打印结果 - 显示传感器数据
                 output_line = f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
                 output_line += f"温度:{temp_raw_str}→{temp_str} | "
                 output_line += f"压力:{pressure_raw_str}→{pressure_str} | "
                 output_line += f"空气密度:{density_str} | "
-                output_line += f"风速:{wind_raw_strs[0]}→{wind_strs[0]} | "
-                output_line += f"{wind_raw_strs[1]}→{wind_strs[1]} | "
-                output_line += f"{wind_raw_strs[2]}→{wind_strs[2]} | "
-                output_line += f"{wind_raw_strs[3]}→{wind_strs[3]}"
+                output_line += f"风速:{wind_strs[0]} | {wind_strs[1]} | {wind_strs[2]} | {wind_strs[3]}"
 
                 print(output_line)
 
