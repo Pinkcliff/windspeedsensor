@@ -187,11 +187,21 @@ def single_connect_continuous_read():
                             full_frame_len = 1 + 1 + 1 + data_len + 2  # 地址+功能码+字节数+数据+CRC
                             if len(response_bytes) >= full_frame_len:
                                 break
-                    
+
                     # 超时判断
                     if time.time() - request_start_time > TIMEOUT:
                         raise socket.timeout(f"接收超时（{TIMEOUT}秒）")
                     time.sleep(0.01)
+
+                # 输出原始数据（用于调试）
+                print(f"\n[{current_time}] 📡 接收到的原始数据: {response_bytes.hex(' ').upper()}")
+                print(f"  数据长度: {len(response_bytes)} 字节")
+                if len(response_bytes) >= 2:
+                    print(f"  从站地址: {response_bytes[0]:02X}")
+                if len(response_bytes) >= 3:
+                    print(f"  功能码: {response_bytes[1]:02X}")
+                if len(response_bytes) >= 4:
+                    print(f"  字节数: {response_bytes[2]:02X}")
 
                 # 解析响应
                 parsed_data = parse_rtu_response(response_bytes)
