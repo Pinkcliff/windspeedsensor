@@ -129,6 +129,7 @@ class WindSpeedPlotter:
         # Initialize 4 subplots
         self.lines_raw = []
         self.lines_filtered = []
+        self.current_value_texts = []  # Initialize list for current value text objects
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
 
         for i, ax in enumerate(self.axes.flat):
@@ -148,7 +149,13 @@ class WindSpeedPlotter:
             # Add legend
             ax.legend(loc='upper right')
 
-            # Set y-axis range
+            # Initialize text objects for current values
+            text_obj = ax.text(0.02, 0.95, '', transform=ax.transAxes,
+                            verticalalignment='top', fontsize=10,
+                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            self.current_value_texts.append(text_obj)
+
+            # Set initial y-axis range
             ax.set_ylim(-1, 25)
 
         # Start connection
@@ -274,25 +281,44 @@ class WindSpeedPlotter:
                         # Show all data
                         self.axes.flat[i].set_xlim(0, max(60, current_time))
 
-                    # Dynamic y-axis adjustment
+                    # Dynamic y-axis adjustment - ALWAYS update to show current data properly
                     if len(self.wind_raw_data[i]) > 0 and len(self.wind_filtered_data[i]) > 0:
-                        # Get data from visible range
-                        if current_time > 60 and len(self.time_data) > 100:
-                            # Only consider last 60 seconds for y-axis range
-                            visible_start = max(0, len(self.time_data) - 600)  # Approximate last 60 seconds at 10Hz
-                            visible_raw = list(self.wind_raw_data[i])[visible_start:]
-                            visible_filtered = list(self.wind_filtered_data[i])[visible_start:]
-                        else:
-                            visible_raw = list(self.wind_raw_data[i])
-                            visible_filtered = list(self.wind_filtered_data[i])
+                        # Get the most recent data points for y-axis range
+                        recent_points = min(100, len(self.wind_raw_data[i]))  # Use last 100 points
+                        recent_raw = list(self.wind_raw_data[i])[-recent_points:]
+                        recent_filtered = list(self.wind_filtered_data[i])[-recent_points:]
 
-                        if visible_raw and visible_filtered:
-                            all_data = visible_raw + visible_filtered
-                            y_min = min(all_data) - 1
-                            y_max = max(all_data) + 1
+                        if recent_raw and recent_filtered:
+                            all_data = recent_raw + recent_filtered
+                            y_min = min(all_data)
+                            y_max = max(all_data)
+
+                            # Add padding
+                            y_range = y_max - y_min
+                            if y_range < 2:  # Minimum range of 2 m/s
+                                y_range = 2
+                            y_min -= y_range * 0.1  # 10% padding
+                            y_max += y_range * 0.1
+
+                            # Ensure minimum values
                             if y_min < 0: y_min = 0
                             if y_max > 30: y_max = 30
+
+                            # Force y-axis update
                             self.axes.flat[i].set_ylim(y_min, y_max)
+                            # Force redraw of the axis
+                            self.axes.flat[i].relim()
+                            self.axes.flat[i].autoscale_view(scalex=False, scaley=True)
+
+                        # Update current value text
+                        if recent_raw and recent_filtered:
+                            current_raw = recent_raw[-1]
+                            current_filtered = recent_filtered[-1]
+                            self.current_value_texts[i].set_text(
+                                f'Raw: {current_raw:.2f} m/s\n'
+                                f'Filtered: {current_filtered:.2f} m/s\n'
+                                f'Diff: {abs(current_raw - current_filtered):.2f}'
+                            )
 
             # Update success information
             success_rate = self.success_count / self.read_count * 100 if self.read_count > 0 else 0
