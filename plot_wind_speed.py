@@ -129,8 +129,8 @@ class WindSpeedPlotter:
         self.fig.suptitle('Real-time Wind Speed Monitoring (Raw vs Kalman Filtered)',
                          fontsize=16, fontweight='bold')
 
-        # Adjust subplot spacing - increase right margin for legend
-        plt.subplots_adjust(hspace=0.3, wspace=0.25, right=0.85)
+        # Adjust subplot spacing
+        plt.subplots_adjust(hspace=0.3, wspace=0.25)
 
         # Initialize 4 subplots
         self.lines_raw = []
@@ -152,9 +152,8 @@ class WindSpeedPlotter:
             self.lines_raw.append(line_raw)
             self.lines_filtered.append(line_filtered)
 
-            # Add legend - position to the right of the plot area
-            ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), borderaxespad=0,
-                     frameon=True, fancybox=True, shadow=True)
+            # Add legend
+            ax.legend(loc='upper right')
 
             # Initialize text objects for current values
             text_obj = ax.text(0.02, 0.95, '', transform=ax.transAxes,
@@ -393,15 +392,19 @@ class WindSpeedPlotter:
                     # Update filtered data line
                     self.lines_filtered[i].set_data(self.time_data, self.wind_filtered_data[i])
 
-                    # Dynamic x-axis adjustment - start scrolling when 80% of time window is reached
+                    # Dynamic x-axis adjustment - keep current time slightly left of edge
                     time_window = 60  # 60 seconds window
+                    time_margin = 5  # Keep 5 seconds margin on the right
+
                     if current_time > time_window * 0.8 and len(self.time_data) > 100:
                         # Start scrolling when reaching 80% of time window (48 seconds)
-                        # Always show last time_window seconds
-                        self.axes.flat[i].set_xlim(current_time - time_window, current_time)
+                        # Show time_window + margin seconds, with current time not at edge
+                        x_min = current_time - time_window
+                        x_max = current_time + time_margin
+                        self.axes.flat[i].set_xlim(x_min, x_max)
                     else:
-                        # Show all data or initial window
-                        self.axes.flat[i].set_xlim(0, max(time_window, current_time))
+                        # Show all data or initial window, with margin
+                        self.axes.flat[i].set_xlim(0, max(time_window, current_time + time_margin))
 
                     # Dynamic y-axis adjustment - ALWAYS update to show current data properly
                     if len(self.wind_raw_data[i]) > 0 and len(self.wind_filtered_data[i]) > 0:
