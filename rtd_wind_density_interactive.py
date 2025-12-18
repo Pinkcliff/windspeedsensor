@@ -85,21 +85,24 @@ class RTDWindDensityInteractive:
         self.lines = {}
 
         # Create line objects for each sensor
+        # Define unique colors for corrected data lines
+        corrected_colors = ['#8B0000', '#006400', '#00008B', '#8B4513']  # DarkRed, DarkGreen, DarkBlue, SaddleBrown
+
         for i in range(4):
-            # Raw data (dashed line)
+            # Raw data (dashed line) - lighter version of sensor color
             label = f'{self.sensor_names[i]} Raw'
             line, = self.ax.plot([], [], color=self.colors[i], alpha=0.4,
                                 linewidth=1, linestyle='--', label=label)
             self.lines[label] = line
 
-            # Filtered data (solid line)
+            # Filtered data (solid line) - full sensor color
             label = f'{self.sensor_names[i]} Filtered'
             line, = self.ax.plot([], [], color=self.colors[i], linewidth=2, label=label)
             self.lines[label] = line
 
-            # Corrected data (red solid line)
+            # Corrected data (solid line) - unique color for each sensor
             label = f'{self.sensor_names[i]} Corrected'
-            line, = self.ax.plot([], [], color='red', linewidth=2.5, alpha=0.7, label=label)
+            line, = self.ax.plot([], [], color=corrected_colors[i], linewidth=2.5, alpha=0.8, label=label)
             self.lines[label] = line
 
         # Setup axes
