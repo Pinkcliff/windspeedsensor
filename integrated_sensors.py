@@ -84,7 +84,7 @@ class AnalogSensorReader:
         self.START_REG = 0                # 起始寄存器地址
         self.REG_COUNT = 12               # 读取寄存器数量（增加第11路和第12路）
         self.READ_INTERVAL = 0.1          # 读取间隔（秒）
-        self.TIMEOUT = 5                  # 单次读写超时时间
+        self.TIMEOUT = 1                  # 单次读写超时时间（缩短为1秒以便快速响应停止）
         self.BUFFER_SIZE = 1024
         self.RECONNECT_ATTEMPT = 1        # 连接断开后的重连次数
 
@@ -97,6 +97,7 @@ class AnalogSensorReader:
         self.fail_count = 0               # 失败次数
         self.sock: Optional[socket.socket] = None  # 连接对象
         self.running = False              # 运行状态
+        self.start_time = time.time()     # 记录开始时间
 
         # 卡尔曼滤波器初始化 - 仅对风速进行滤波
         self.wind_filters = [create_wind_speed_filter() for _ in range(4)]  # 4个风速滤波器
@@ -139,6 +140,10 @@ class AnalogSensorReader:
         read_start_time = time.time()
 
         try:
+            # 检查是否需要停止
+            if not self.running:
+                return None
+
             if not self.sock:
                 if not self.connect_device():
                     self.fail_count += 1
@@ -160,6 +165,10 @@ class AnalogSensorReader:
             request_start_time = time.time()
 
             while True:
+                # 检查是否需要停止
+                if not self.running:
+                    return None
+
                 chunk = self.sock.recv(self.BUFFER_SIZE)
                 if chunk:
                     response_bytes += chunk
@@ -330,7 +339,11 @@ class AnalogSensorReader:
 
         while self.running:
             self.read_sensors()
-            time.sleep(self.READ_INTERVAL)
+            # 使用可中断的睡眠
+            for _ in range(int(self.READ_INTERVAL * 10)):
+                if not self.running:
+                    break
+                time.sleep(0.1)
 
         # 关闭连接
         if self.sock:
@@ -354,7 +367,7 @@ class RTDTemperatureReader:
         self.START_REG = 0                # 12路温度起始寄存器地址
         self.REG_COUNT = 12               # 读取12路温度寄存器数量
         self.READ_INTERVAL = 1            # 读取间隔（秒）
-        self.TIMEOUT = 5                  # 单次读写超时时间
+        self.TIMEOUT = 1                  # 单次读写超时时间（缩短为1秒以便快速响应停止）
         self.BUFFER_SIZE = 1024
         self.RECONNECT_ATTEMPT = 1        # 连接断开后的重连次数
 
@@ -370,6 +383,7 @@ class RTDTemperatureReader:
         self.fail_count = 0               # 失败次数
         self.sock: Optional[socket.socket] = None  # 连接对象
         self.running = False              # 运行状态
+        self.start_time = time.time()     # 记录开始时间
 
         # 颜色编码
         self.RED = "\033[91m"
@@ -409,6 +423,10 @@ class RTDTemperatureReader:
         read_start_time = time.time()
 
         try:
+            # 检查是否需要停止
+            if not self.running:
+                return None
+
             if not self.sock:
                 if not self.connect_device():
                     self.fail_count += 1
@@ -428,6 +446,10 @@ class RTDTemperatureReader:
             request_start_time = time.time()
 
             while True:
+                # 检查是否需要停止
+                if not self.running:
+                    return None
+
                 chunk = self.sock.recv(self.BUFFER_SIZE)
                 if chunk:
                     response_bytes += chunk
@@ -523,7 +545,11 @@ class RTDTemperatureReader:
 
         while self.running:
             self.read_sensors()
-            time.sleep(self.READ_INTERVAL)
+            # 使用可中断的睡眠
+            for _ in range(int(self.READ_INTERVAL * 10)):
+                if not self.running:
+                    break
+                time.sleep(0.1)
 
         # 关闭连接
         if self.sock:
