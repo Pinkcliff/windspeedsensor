@@ -84,6 +84,10 @@ def single_connect_continuous_read_rtc_12ch():
     BUFFER_SIZE = 1024
     RECONNECT_ATTEMPT = 1        # 连接断开后的重连次数
 
+    # 修改：仅输出第5-8路温度
+    DISPLAY_START_CH = 5         # 起始显示通道（第5路）
+    DISPLAY_END_CH = 8           # 结束显示通道（第8路）
+
     # 2. 全局变量（12路RTC专用）
     last_temperatures: List[Optional[float]] = [None] * 12  # 保存12路温度值
     last_registers: List[int] = []
@@ -105,6 +109,7 @@ def single_connect_continuous_read_rtc_12ch():
     print(f"📡 设备地址: {DEVICE_IP}:{DEVICE_PORT}")
     print(f"🔌 从站地址: {SLAVE_ADDR} | 功能码: 0x{FUNC_CODE:02X}")
     print(f"📝 读取范围: 寄存器{START_REG}~{START_REG+REG_COUNT-1}（共{REG_COUNT}路温度传感器）")
+    print(f"📊 显示范围: 第{DISPLAY_START_CH}路~第{DISPLAY_END_CH}路温度传感器")
     print(f"⏱️  读取间隔: {READ_INTERVAL}秒 | 超时时间: {TIMEOUT}秒")
     print(f"🔍 温度变化将以 {RED}红色{RESET} 高亮显示")
     print(f"🔄 连接断开后自动重连（{RECONNECT_ATTEMPT}次）")
@@ -127,7 +132,7 @@ def single_connect_continuous_read_rtc_12ch():
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(TIMEOUT)
             sock.connect((DEVICE_IP, DEVICE_PORT))
-            print(f"{GREEN}✅ 连接成功！开始读取12路RTC温度...{RESET}")
+            print(f"{GREEN}✅ 连接成功！开始读取{DISPLAY_END_CH-DISPLAY_START_CH+1}路RTC温度...{RESET}")
             return True
         except ConnectionRefusedError:
             print(f"{RED}❌ 连接失败: 设备拒绝连接（IP/端口错误或设备离线）{RESET}")
@@ -231,12 +236,12 @@ def single_connect_continuous_read_rtc_12ch():
 
                 read_duration = (time.time() - read_start_time) * 1000  # 毫秒
 
-                # 打印结果（12路RTC专用格式）
-                header = f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | 12路温度传感器数据:"
+                # 打印结果（仅显示第5-8路）
+                header = f"[{current_time}] ✅ 第{read_count:03d}次 | 耗时:{read_duration:4.0f}ms | 第{DISPLAY_START_CH}-{DISPLAY_END_CH}路温度传感器数据:"
                 print(header)
 
-                # 每行显示一个传感器
-                for i in range(12):
+                # 仅显示第5-8路传感器
+                for i in range(DISPLAY_START_CH-1, DISPLAY_END_CH):
                     print(f"    {temp_display_strings[i]}")
 
                 print()  # 空行分隔
@@ -286,12 +291,12 @@ def single_connect_continuous_read_rtc_12ch():
             except:
                 pass
 
-    # 7. 最终统计报告（12路RTC专用）
+    # 7. 最终统计报告（第5-8路RTC专用）
     total_runtime = time.time() - start_time
     success_rate = (success_count / read_count * 100) if read_count > 0 else 0.0
 
     print("\n" + "="*80)
-    print("📋 12路RTC温度读取结束 - 统计报告")
+    print(f"📋 第{DISPLAY_START_CH}-{DISPLAY_END_CH}路RTC温度读取结束 - 统计报告")
     print("="*80)
     print(f"🕐 总运行时间: {total_runtime:.1f} 秒")
     print(f"🔢 总读取次数: {read_count}")
