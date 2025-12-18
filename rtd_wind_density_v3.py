@@ -98,8 +98,8 @@ class RTDWindDensityPlotter:
         self.BUFFER_SIZE = 1024
 
         # RTD device parameters
-        self.RTD_DEVICE_IP = "192.168.0.100"
-        self.RTD_DEVICE_PORT = 502
+        self.RTD_DEVICE_IP = "192.168.1.101"
+        self.RTD_DEVICE_PORT = 8234
         self.RTD_SLAVE_ADDR = 1
         self.RTD_FUNC_CODE = 0x04
         self.RTD_START_REG = 0
@@ -164,26 +164,26 @@ class RTDWindDensityPlotter:
         self.density_texts = []
 
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-        titles = ['风速传感器 1 (RTD05)', '风速传感器 2 (RTD06)',
-                 '风速传感器 3 (RTD07)', '风速传感器 4 (RTD08)']
+        titles = ['Wind Sensor 1 (RTD05)', 'Wind Sensor 2 (RTD06)',
+                 'Wind Sensor 3 (RTD07)', 'Wind Sensor 4 (RTD08)']
 
         for i, ax in enumerate(self.axes.flat):
             ax.set_title(titles[i], fontsize=12)
-            ax.set_xlabel('时间 (秒)', fontsize=10)
-            ax.set_ylabel('风速 (m/s)', fontsize=10)
+            ax.set_xlabel('Time (s)', fontsize=10)
+            ax.set_ylabel('Wind Speed (m/s)', fontsize=10)
             ax.grid(True, alpha=0.3)
 
             # Create line objects
-            line_raw, = ax.plot([], [], color=colors[i], alpha=0.4, linewidth=1, label='原始值')
-            line_filtered, = ax.plot([], [], color=colors[i], linewidth=2, label='滤波后')
-            line_corrected, = ax.plot([], [], color='red', linewidth=2.5, label='密度修正后')
+            line_raw, = ax.plot([], [], color=colors[i], alpha=0.4, linewidth=1, label='Raw')
+            line_filtered, = ax.plot([], [], color=colors[i], linewidth=2, label='Filtered')
+            line_corrected, = ax.plot([], [], color='red', linewidth=2.5, label='Density Corrected')
 
             self.lines_raw.append(line_raw)
             self.lines_filtered.append(line_filtered)
             self.lines_corrected.append(line_corrected)
 
-            # Add legend
-            ax.legend(loc='upper right')
+            # Add legend at lower right
+            ax.legend(loc='lower right')
 
             # Initialize text objects for current values
             text_obj = ax.text(0.02, 0.95, '', transform=ax.transAxes,
@@ -215,9 +215,9 @@ class RTDWindDensityPlotter:
             self.wind_sock.settimeout(self.TIMEOUT)
             self.wind_sock.connect((self.WIND_DEVICE_IP, self.WIND_DEVICE_PORT))
             self.wind_connected = True
-            print(f"成功连接到风速设备 {self.WIND_DEVICE_IP}:{self.WIND_DEVICE_PORT}")
+            print(f"Successfully connected to wind device {self.WIND_DEVICE_IP}:{self.WIND_DEVICE_PORT}")
         except Exception as e:
-            print(f"风速设备连接失败: {str(e)}")
+            print(f"Wind device connection failed: {str(e)}")
             self.wind_connected = False
             success = False
 
@@ -229,9 +229,9 @@ class RTDWindDensityPlotter:
             self.rtd_sock.settimeout(self.TIMEOUT)
             self.rtd_sock.connect((self.RTD_DEVICE_IP, self.RTD_DEVICE_PORT))
             self.rtd_connected = True
-            print(f"成功连接到RTD设备 {self.RTD_DEVICE_IP}:{self.RTD_DEVICE_PORT}")
+            print(f"Successfully connected to RTD device {self.RTD_DEVICE_IP}:{self.RTD_DEVICE_PORT}")
         except Exception as e:
-            print(f"RTD设备连接失败: {str(e)}")
+            print(f"RTD device connection failed: {str(e)}")
             self.rtd_connected = False
             success = False
 
@@ -269,18 +269,18 @@ class RTDWindDensityPlotter:
                             break
 
                 if time.time() - request_start_time > self.TIMEOUT:
-                    raise socket.timeout("接收超时")
+                    raise socket.timeout("Receive timeout")
                 time.sleep(0.01)
 
             # Parse response
             parsed_data = parse_rtu_response(response_bytes)
             if "error" in parsed_data:
-                print(f"风速数据解析失败: {parsed_data['error']}")
+                print(f"Wind data parse failed: {parsed_data['error']}")
                 return None
 
             registers = parsed_data["registers"]
             if len(registers) < self.WIND_REG_COUNT:
-                print(f"风速数据不足: 需要{self.WIND_REG_COUNT}个, 得到{len(registers)}个")
+                print(f"Insufficient wind data: need {self.WIND_REG_COUNT}, got {len(registers)}")
                 return None
 
             # Extract wind speed data (registers 4-7)
@@ -296,13 +296,13 @@ class RTDWindDensityPlotter:
             pressure_current = pressure_raw / 249
             pressure = (pressure_current - 4) * 7.5
 
-            # 使用固定湿度值40%（根据sensor.py的说明）
+            # Use fixed humidity value 40% (according to sensor.py)
             humidity = 40.0
 
             return wind_speeds_raw, pressure, humidity
 
         except Exception as e:
-            print(f"风速数据读取失败: {str(e)}")
+            print(f"Wind data read failed: {str(e)}")
             if "Connection" in str(e) or "reset" in str(e):
                 self.wind_connected = False
                 self.connect_devices()
@@ -340,18 +340,18 @@ class RTDWindDensityPlotter:
                             break
 
                 if time.time() - request_start_time > self.TIMEOUT:
-                    raise socket.timeout("RTD接收超时")
+                    raise socket.timeout("RTD receive timeout")
                 time.sleep(0.01)
 
             # Parse response
             parsed_data = parse_rtu_response(response_bytes)
             if "error" in parsed_data:
-                print(f"RTD数据解析失败: {parsed_data['error']}")
+                print(f"RTD data parse failed: {parsed_data['error']}")
                 return None
 
             registers = parsed_data["registers"]
             if len(registers) < self.RTD_REG_COUNT:
-                print(f"RTD数据不足: 需要{self.RTD_REG_COUNT}个, 得到{len(registers)}个")
+                print(f"Insufficient RTD data: need {self.RTD_REG_COUNT}, got {len(registers)}")
                 return None
 
             # Extract RTD temperatures (registers 4-7 for channels 5-8)
@@ -365,7 +365,7 @@ class RTDWindDensityPlotter:
             return rtd_temps
 
         except Exception as e:
-            print(f"RTD数据读取失败: {str(e)}")
+            print(f"RTD data read failed: {str(e)}")
             if "Connection" in str(e) or "reset" in str(e):
                 self.rtd_connected = False
                 self.connect_devices()
@@ -472,15 +472,15 @@ class RTDWindDensityPlotter:
                         K = (self.calibration_density / current_density) ** 0.5 if current_density > 0 else 1.0
 
                         self.current_value_texts[i].set_text(
-                            f'原始: {recent_raw[-1]:.2f} m/s\n'
-                            f'滤波: {recent_filtered[-1]:.2f} m/s\n'
-                            f'修正: {recent_corrected[-1]:.2f} m/s'
+                            f'Raw: {recent_raw[-1]:.2f} m/s\n'
+                            f'Filtered: {recent_filtered[-1]:.2f} m/s\n'
+                            f'Corrected: {recent_corrected[-1]:.2f} m/s'
                         )
 
                         self.density_texts[i].set_text(
-                            f'RTD: {current_rtd:.1f}°C\n'
-                            f'ρ: {current_density:.3f} kg/m³\n'
-                            f'K: {K:.3f}'
+                            f'RTD: {current_rtd:.1f}C\n'
+                            f'Density: {current_density:.3f} kg/m3\n'
+                            f'K factor: {K:.3f}'
                         )
 
             # Update title with statistics
@@ -491,16 +491,16 @@ class RTDWindDensityPlotter:
                 current_humidity = self.humidity_data[-1]
 
                 self.fig.suptitle(
-                    f'RTD风速监测系统 | 成功率: {success_rate:.1f}% | '
-                    f'读取次数: {self.read_count} | 运行时间: {current_time:.0f}s\n'
-                    f'当前环境: 密度={current_density:.3f} kg/m³, 压力={current_pressure:.1f} kPa, 湿度={current_humidity:.1f}%RH',
+                    f'RTD Wind Speed Monitoring | Success: {success_rate:.1f}% | '
+                    f'Reads: {self.read_count} | Runtime: {current_time:.0f}s\n'
+                    f'Environment: Density={current_density:.3f} kg/m3, Pressure={current_pressure:.1f} kPa, Humidity={current_humidity:.1f}%RH',
                     fontsize=12, fontweight='bold'
                 )
 
             # Print status
             if self.frame_count % 10 == 0:
-                print(f"\r时间: {current_time:6.1f}s | "
-                      f"风速修正后: {self.wind_corrected_data[0][-1]:5.2f} | "
+                print(f"\rTime: {current_time:6.1f}s | "
+                      f"Corrected: {self.wind_corrected_data[0][-1]:5.2f} | "
                       f"{self.wind_corrected_data[1][-1]:5.2f} | "
                       f"{self.wind_corrected_data[2][-1]:5.2f} | "
                       f"{self.wind_corrected_data[3][-1]:5.2f} m/s", end='')
@@ -513,14 +513,14 @@ class RTDWindDensityPlotter:
     def start(self):
         """Start real-time plotting"""
         print("\n" + "="*60)
-        print("RTD风速监测系统 - 带空气密度修正")
+        print("RTD Wind Speed Monitoring System with Air Density Correction")
         print("="*60)
-        print(f"风速设备: {self.WIND_DEVICE_IP}:{self.WIND_DEVICE_PORT}")
-        print(f"RTD设备: {self.RTD_DEVICE_IP}:{self.RTD_DEVICE_PORT}")
-        print(f"标定条件: {self.CALIBRATION_TEMP}°C, {self.CALIBRATION_RH*100}%RH, {self.CALIBRATION_PRESSURE}kPa")
-        print(f"标定密度: {self.calibration_density:.3f} kg/m³")
-        print("显示内容: 原始值、卡尔曼滤波值、基于RTD温度的密度修正值")
-        print("按Ctrl+C停止")
+        print(f"Wind device: {self.WIND_DEVICE_IP}:{self.WIND_DEVICE_PORT}")
+        print(f"RTD device: {self.RTD_DEVICE_IP}:{self.RTD_DEVICE_PORT}")
+        print(f"Calibration: {self.CALIBRATION_TEMP}°C, {self.CALIBRATION_RH*100}%RH, {self.CALIBRATION_PRESSURE}kPa")
+        print(f"Calibration density: {self.calibration_density:.3f} kg/m³")
+        print("Display: Raw, Kalman filtered, and density corrected values")
+        print("Press Ctrl+C to stop")
         print("="*60)
 
         # Disable interactive mode
@@ -535,7 +535,7 @@ class RTDWindDensityPlotter:
         try:
             plt.show()
         except KeyboardInterrupt:
-            print("\n\n用户中断，停止程序...")
+            print("\n\nUser interrupted, stopping...")
         finally:
             # Close connections
             if self.wind_sock:
@@ -548,14 +548,14 @@ class RTDWindDensityPlotter:
             success_rate = self.success_count / self.read_count * 100 if self.read_count > 0 else 0
 
             print("\n" + "="*60)
-            print("统计报告")
+            print("Statistics Report")
             print("="*60)
-            print(f"总运行时间: {total_runtime:.1f} 秒")
-            print(f"总读取次数: {self.read_count}")
-            print(f"成功次数: {self.success_count}")
-            print(f"失败次数: {self.fail_count}")
-            print(f"成功率: {success_rate:.1f}%")
-            print(f"数据点存储: {len(self.time_data)}")
+            print(f"Total runtime: {total_runtime:.1f} seconds")
+            print(f"Total reads: {self.read_count}")
+            print(f"Successful reads: {self.success_count}")
+            print(f"Failed reads: {self.fail_count}")
+            print(f"Success rate: {success_rate:.1f}%")
+            print(f"Data points stored: {len(self.time_data)}")
             print("="*60)
 
 if __name__ == "__main__":
