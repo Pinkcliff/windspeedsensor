@@ -259,7 +259,7 @@ class AnalogSensorReader:
             pressure_raw_str = f"{pressure_raw:4d}"
             humidity_str = f"{humidity:5.1f}%"
             humidity_raw_str = f"{humidity_raw:4d}"
-            density_str = f"{air_density:5.2f}kg/m³"
+            density_str = f"{air_density:6.3f}kg/m³"
 
             wind_strs = []
             wind_raw_strs = []
