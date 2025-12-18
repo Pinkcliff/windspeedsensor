@@ -4,6 +4,10 @@ from typing import List, Dict, Optional
 from Refrigerant import AIR
 from kalman_filter import create_wind_speed_filter
 import threading
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from collections import deque
+import numpy as np
 
 
 # --------------------------
@@ -91,6 +95,13 @@ class SharedData:
 
         # 时间戳
         self.last_update_time = time.time()
+
+        # 用于绘图的历史数据（保存最近300个数据点）
+        self.plot_data_length = 300
+        self.time_history = deque(maxlen=self.plot_data_length)
+        self.wind_raw_history = [deque(maxlen=self.plot_data_length) for _ in range(4)]
+        self.wind_filtered_history = [deque(maxlen=self.plot_data_length) for _ in range(4)]
+        self.wind_corrected_history = [deque(maxlen=self.plot_data_length) for _ in range(4)]
 
 
 # --------------------------
@@ -541,6 +552,7 @@ class DataProcessor:
             # 计算每个RTD位置对应的空气密度和修正风速
             densities = []
             display_lines = []
+            corrected_wind_speeds = []  # 保存修正后的风速
 
             for i in range(4):  # 4个传感器
                 # 计算该RTD温度下的空气密度
@@ -551,6 +563,7 @@ class DataProcessor:
                 # K = √(标定空气密度 / 实时空气密度)
                 K = (self.calibration_density / density) ** 0.5 if density > 0 else 1.0
                 corrected_wind_speed = wind_speeds[i] * K
+                corrected_wind_speeds.append(corrected_wind_speed)
 
                 # 构建显示字符串
                 rtd_temp_str = f"{rtd_temps[i]:5.1f}℃"
@@ -596,11 +609,124 @@ class DataProcessor:
 
             print()  # 空行分隔
 
+            # 更新绘图数据
+            with self.shared_data.lock:
+                current_time = time.time()
+                self.shared_data.time_history.append(current_time)
+                for i in range(4):
+                    self.shared_data.wind_raw_history[i].append(wind_speeds_raw[i])
+                    self.shared_data.wind_filtered_history[i].append(wind_speeds[i])
+                    self.shared_data.wind_corrected_history[i].append(corrected_wind_speeds[i])
+
             # 等待下一次显示
             for _ in range(10):  # 1秒间隔，每0.1秒检查一次
                 if not self.running:
                     break
                 time.sleep(0.1)
+
+
+# --------------------------
+# 实时绘图类
+# --------------------------
+class WindSpeedPlotter:
+    def __init__(self, shared_data: SharedData):
+        self.shared_data = shared_data
+        self.running = False
+
+        # 创建图形和子图
+        try:
+            plt.style.use('seaborn-v0_8-darkgrid')
+        except:
+            plt.style.use('default')
+        self.fig, self.axes = plt.subplots(2, 2, figsize=(15, 10))
+        self.fig.suptitle('风速实时监测 - 原始值/滤波值/修正后', fontsize=16)
+
+        # 扁平化axes数组以便于索引
+        self.axes = self.axes.flatten()
+
+        # 每个子图的标题
+        self.titles = ['风速传感器 1 (RTD05)', '风速传感器 2 (RTD06)',
+                       '风速传感器 3 (RTD07)', '风速传感器 4 (RTD08)']
+
+        # 初始化每条线
+        self.lines_raw = []
+        self.lines_filtered = []
+        self.lines_corrected = []
+
+        for i, ax in enumerate(self.axes):
+            ax.set_title(self.titles[i])
+            ax.set_xlabel('时间 (秒)')
+            ax.set_ylabel('风速 (m/s)')
+            ax.grid(True, alpha=0.3)
+
+            # 创建三条线
+            line_raw, = ax.plot([], [], 'r-', label='原始值', alpha=0.7, linewidth=1)
+            line_filtered, = ax.plot([], [], 'b-', label='滤波后', linewidth=2)
+            line_corrected, = ax.plot([], [], 'g-', label='修正后', linewidth=2)
+
+            self.lines_raw.append(line_raw)
+            self.lines_filtered.append(line_filtered)
+            self.lines_corrected.append(line_corrected)
+
+            # 添加图例
+            ax.legend(loc='upper right')
+
+            # 设置y轴范围
+            ax.set_ylim(-5, 20)
+
+        # 调整子图间距
+        plt.tight_layout()
+
+    def update_plot(self, frame):
+        """更新绘图数据"""
+        # 获取最新数据
+        with self.shared_data.lock:
+            if len(self.shared_data.time_history) > 0:
+                time_data = list(self.shared_data.time_history)
+
+                for i in range(4):
+                    # 获取风速数据
+                    raw_data = list(self.shared_data.wind_raw_history[i])
+                    filtered_data = list(self.shared_data.wind_filtered_history[i])
+                    corrected_data = list(self.shared_data.wind_corrected_history[i])
+
+                    # 计算相对时间（秒）
+                    if time_data:
+                        relative_time = [(t - time_data[0]) for t in time_data]
+                    else:
+                        relative_time = []
+
+                    # 更新线条数据
+                    self.lines_raw[i].set_data(relative_time, raw_data)
+                    self.lines_filtered[i].set_data(relative_time, filtered_data)
+                    self.lines_corrected[i].set_data(relative_time, corrected_data)
+
+                    # 自动调整x轴范围
+                    if relative_time:
+                        self.axes[i].set_xlim(max(0, relative_time[-1] - 60), relative_time[-1] + 1)
+
+                        # 自动调整y轴范围
+                        all_data = raw_data + filtered_data + corrected_data
+                        if all_data:
+                            y_min = min(all_data) - 1
+                            y_max = max(all_data) + 1
+                            self.axes[i].set_ylim(y_min, y_max)
+
+        return self.lines_raw + self.lines_filtered + self.lines_corrected
+
+    def run(self):
+        """运行绘图"""
+        self.running = True
+
+        # 创建动画
+        self.ani = animation.FuncAnimation(
+            self.fig, self.update_plot,
+            interval=100,  # 每100ms更新一次
+            blit=True,
+            cache_frame_data=False
+        )
+
+        plt.show()
 
 
 # --------------------------
@@ -620,15 +746,17 @@ def main():
     # 创建共享数据对象
     shared_data = SharedData()
 
-    # 创建读取器和处理器
+    # 创建读取器、处理器和绘图器
     analog_reader = AnalogSensorReader(shared_data)
     rtd_reader = RTDTemperatureReader(shared_data)
     processor = DataProcessor(shared_data)
+    plotter = WindSpeedPlotter(shared_data)
 
     # 创建线程
     analog_thread = threading.Thread(target=analog_reader.run)
     rtd_thread = threading.Thread(target=rtd_reader.run)
     processor_thread = threading.Thread(target=processor.run)
+    plotter_thread = threading.Thread(target=plotter.run)
 
     try:
         # 连接设备
@@ -653,11 +781,14 @@ def main():
         rtd_thread.start()
         time.sleep(0.5)  # 等待数据稳定
         processor_thread.start()
+        time.sleep(1)  # 等待一些数据累积
+        plotter_thread.start()
 
         # 等待线程结束
         analog_thread.join()
         rtd_thread.join()
         processor_thread.join()
+        plotter_thread.join()
 
     except KeyboardInterrupt:
         print(f"\n{analog_reader.YELLOW}⚠️  用户中断，正在停止程序...{analog_reader.RESET}")
@@ -666,11 +797,16 @@ def main():
         analog_reader.running = False
         rtd_reader.running = False
         processor.running = False
+        plotter.running = False
+
+        # 关闭matplotlib窗口
+        plt.close('all')
 
         # 等待线程结束
         analog_thread.join(timeout=2)
         rtd_thread.join(timeout=2)
         processor_thread.join(timeout=2)
+        plotter_thread.join(timeout=2)
 
     # 最终统计报告
     print("\n" + "="*90)
