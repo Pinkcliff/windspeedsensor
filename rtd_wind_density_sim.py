@@ -3,8 +3,6 @@ RTD Wind Speed Monitoring with Air Density Correction - Simulation Version
 Uses simulated data to test matplotlib display without actual devices
 """
 
-import matplotlib
-matplotlib.use('TkAgg')  # 使用TkAgg后端
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from collections import deque

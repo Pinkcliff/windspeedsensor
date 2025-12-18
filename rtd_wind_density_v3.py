@@ -291,14 +291,13 @@ class RTDWindDensityPlotter:
                 wind_speed_raw = (current_value - 4) * 30 / 16  # Convert to wind speed (m/s)
                 wind_speeds_raw.append(wind_speed_raw)
 
-            # Extract pressure (register 1) and humidity (register 7)
+            # Extract pressure (register 1)
             pressure_raw = registers[1]
             pressure_current = pressure_raw / 249
             pressure = (pressure_current - 4) * 7.5
 
-            humidity_raw = registers[7] if len(registers) > 7 else 0
-            humidity_current = humidity_raw / 249
-            humidity = (humidity_current - 4) * 100 / 16
+            # 使用固定湿度值40%（根据sensor.py的说明）
+            humidity = 40.0
 
             return wind_speeds_raw, pressure, humidity
 
