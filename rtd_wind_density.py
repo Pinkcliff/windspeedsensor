@@ -493,7 +493,35 @@ class DataProcessor:
                 wind_speeds_raw = self.shared_data.wind_speeds_raw.copy()
                 pressure = self.shared_data.analog_pressure
                 humidity = self.shared_data.analog_humidity
+                analog_temp = self.shared_data.analog_temp  # 模拟量第1路温度
                 update_time = self.shared_data.last_update_time
+
+            # 计算模拟量温度对应的空气密度
+            analog_density = self.calculate_air_density(analog_temp, pressure, humidity)
+
+            # 构建模拟量温度显示行
+            analog_temp_str = f"{analog_temp:5.1f}℃"
+            analog_density_str = f"{analog_density:6.3f}kg/m³"
+
+            # 高亮模拟量温度变化
+            if hasattr(self, 'last_analog_data'):
+                last_temp, last_density = self.last_analog_data
+                if abs(analog_temp - last_temp) > 0.1:
+                    analog_temp_str = f"{self.RED}{analog_temp:5.1f}℃{self.RESET}"
+                if abs(analog_density - last_density) > 0.001:
+                    analog_density_str = f"{self.RED}{analog_density:6.3f}kg/m³{self.RESET}"
+
+            # 存储模拟量数据
+            self.last_analog_data = (analog_temp, analog_density)
+
+            # 打印标题
+            header = f"[{current_time}] ✅ 第{display_count:03d}次 | 压力:{pressure:5.1f}kPa | 湿度:{humidity:5.1f}%"
+            print(header)
+
+            # 打印模拟量温度和对应的空气密度
+            analog_line = f"  模拟量温度: {analog_temp_str} | 空气密度: {analog_density_str}"
+            print(analog_line)
+            print("-" * 90)  # 分隔线
 
             # 计算每个RTD位置对应的空气密度
             densities = []
@@ -531,10 +559,6 @@ class DataProcessor:
                 # 构建显示行
                 line = f"  RTD{i+5:02d}: {rtd_temp_str} | 风速{i+1}: {wind_str} | 空气密度: {density_str}"
                 display_lines.append(line)
-
-            # 打印标题
-            header = f"[{current_time}] ✅ 第{display_count:03d}次 | 压力:{pressure:5.1f}kPa | 湿度:{humidity:5.1f}%"
-            print(header)
 
             # 打印4个传感器的数据
             for line in display_lines:
