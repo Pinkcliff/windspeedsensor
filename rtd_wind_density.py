@@ -457,6 +457,18 @@ class DataProcessor:
         # 上一次的显示数据（用于高亮变化）
         self.last_display_data = [None] * 4  # 存储4路的上次显示数据
 
+        # 标定环境参数
+        self.CALIBRATION_TEMP = 23.1      # 标定温度(℃)
+        self.CALIBRATION_RH = 0.65        # 标定相对湿度(65%)
+        self.CALIBRATION_PRESSURE = 101.325  # 标定大气压力(kPa)
+
+        # 计算标定空气密度
+        self.calibration_density = self.calculate_air_density(
+            self.CALIBRATION_TEMP,
+            self.CALIBRATION_PRESSURE,
+            self.CALIBRATION_RH * 100
+        )
+
         # 颜色编码
         self.RED = "\033[91m"
         self.GREEN = "\033[92m"
@@ -480,6 +492,9 @@ class DataProcessor:
         display_count = 0
 
         print(f"\n{self.GREEN}📊 开始显示传感器数据...{self.RESET}")
+        print("="*90)
+        print(f"标定环境参数: 温度 {self.CALIBRATION_TEMP}℃ | 湿度 {self.CALIBRATION_RH*100:.0f}% | 压力 {self.CALIBRATION_PRESSURE:.3f}kPa")
+        print(f"标定空气密度: {self.calibration_density:.3f} kg/m³")
         print("="*90)
 
         while self.running:
@@ -523,7 +538,7 @@ class DataProcessor:
             print(analog_line)
             print("-" * 90)  # 分隔线
 
-            # 计算每个RTD位置对应的空气密度
+            # 计算每个RTD位置对应的空气密度和修正风速
             densities = []
             display_lines = []
 
@@ -532,14 +547,21 @@ class DataProcessor:
                 density = self.calculate_air_density(rtd_temps[i], pressure, humidity)
                 densities.append(density)
 
+                # 计算修正系数K和修正后的风速
+                # K = √(标定空气密度 / 实时空气密度)
+                K = (self.calibration_density / density) ** 0.5 if density > 0 else 1.0
+                corrected_wind_speed = wind_speeds[i] * K
+
                 # 构建显示字符串
                 rtd_temp_str = f"{rtd_temps[i]:5.1f}℃"
                 wind_str = f"{wind_speeds_raw[i]:5.1f}→{wind_speeds[i]:5.1f}m/s"
                 density_str = f"{density:6.3f}kg/m³"
+                k_str = f"{K:5.3f}"
+                corrected_wind_str = f"{corrected_wind_speed:5.1f}m/s"
 
                 # 高亮变化数据
                 if self.last_display_data[i]:
-                    last_temp, last_wind, last_density = self.last_display_data[i]
+                    last_temp, last_wind, last_density, last_k, last_corrected = self.last_display_data[i]
 
                     # 温度变化
                     if abs(rtd_temps[i] - last_temp) > 0.1:
@@ -553,11 +575,19 @@ class DataProcessor:
                     if abs(density - last_density) > 0.001:
                         density_str = f"{self.RED}{density:6.3f}kg/m³{self.RESET}"
 
-                # 存储当前显示数据
-                self.last_display_data[i] = (rtd_temps[i], wind_speeds[i], density)
+                    # 修正系数变化
+                    if abs(K - last_k) > 0.01:
+                        k_str = f"{self.RED}{K:5.3f}{self.RESET}"
 
-                # 构建显示行
-                line = f"  RTD{i+5:02d}: {rtd_temp_str} | 风速{i+1}: {wind_str} | 空气密度: {density_str}"
+                    # 修正后风速变化
+                    if abs(corrected_wind_speed - last_corrected) > 0.1:
+                        corrected_wind_str = f"{self.RED}{corrected_wind_speed:5.1f}m/s{self.RESET}"
+
+                # 存储当前显示数据
+                self.last_display_data[i] = (rtd_temps[i], wind_speeds[i], density, K, corrected_wind_speed)
+
+                # 构建显示行 - 显示修正前后的对比
+                line = f"  RTD{i+5:02d}: {rtd_temp_str} | 风速{i+1}: {wind_str} | K值:{k_str} | 修正后:{corrected_wind_str} | 空气密度: {density_str}"
                 display_lines.append(line)
 
             # 打印4个传感器的数据
