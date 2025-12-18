@@ -510,19 +510,14 @@ class DataProcessor:
             return 0.0
 
     def run(self):
-        """持续计算和显示数据"""
+        """持续计算数据并更新绘图"""
         self.running = True
         display_count = 0
 
-        print(f"\n{self.GREEN}📊 开始显示传感器数据...{self.RESET}")
-        print("="*90)
-        print(f"标定环境参数: 温度 {self.CALIBRATION_TEMP}℃ | 湿度 {self.CALIBRATION_RH*100:.0f}% | 压力 {self.CALIBRATION_PRESSURE:.3f}kPa")
-        print(f"标定空气密度: {self.calibration_density:.3f} kg/m³")
-        print("="*90)
+        print(f"{self.GREEN}📊 正在计算传感器数据并更新图表...{self.RESET}")
 
         while self.running:
             display_count += 1
-            current_time = time.strftime("%H:%M:%S", time.localtime())
 
             # 获取共享数据的副本
             with self.shared_data.lock:
@@ -534,42 +529,12 @@ class DataProcessor:
                 analog_temp = self.shared_data.analog_temp  # 模拟量第1路温度
                 update_time = self.shared_data.last_update_time
 
-            # 计算模拟量温度对应的空气密度
-            analog_density = self.calculate_air_density(analog_temp, pressure, humidity)
-
-            # 构建模拟量温度显示行
-            analog_temp_str = f"{analog_temp:5.1f}℃"
-            analog_density_str = f"{analog_density:6.3f}kg/m³"
-
-            # 高亮模拟量温度变化
-            if hasattr(self, 'last_analog_data'):
-                last_temp, last_density = self.last_analog_data
-                if abs(analog_temp - last_temp) > 0.1:
-                    analog_temp_str = f"{self.RED}{analog_temp:5.1f}℃{self.RESET}"
-                if abs(analog_density - last_density) > 0.001:
-                    analog_density_str = f"{self.RED}{analog_density:6.3f}kg/m³{self.RESET}"
-
-            # 存储模拟量数据
-            self.last_analog_data = (analog_temp, analog_density)
-
-            # 打印标题
-            header = f"[{current_time}] ✅ 第{display_count:03d}次 | 压力:{pressure:5.1f}kPa | 湿度:{humidity:5.1f}%"
-            print(header)
-
-            # 打印模拟量温度和对应的空气密度
-            analog_line = f"  模拟量温度: {analog_temp_str} | 空气密度: {analog_density_str}"
-            print(analog_line)
-            print("-" * 90)  # 分隔线
-
             # 计算每个RTD位置对应的空气密度和修正风速
-            densities = []
-            display_lines = []
-            corrected_wind_speeds = []  # 保存修正后的风速
+            corrected_wind_speeds = []
 
             for i in range(4):  # 4个传感器
                 # 计算该RTD温度下的空气密度
                 density = self.calculate_air_density(rtd_temps[i], pressure, humidity)
-                densities.append(density)
 
                 # 计算修正系数K和修正后的风速
                 # K = √(标定空气密度 / 实时空气密度)
@@ -577,49 +542,10 @@ class DataProcessor:
                 corrected_wind_speed = wind_speeds[i] * K
                 corrected_wind_speeds.append(corrected_wind_speed)
 
-                # 构建显示字符串
-                rtd_temp_str = f"{rtd_temps[i]:5.1f}℃"
-                wind_str = f"{wind_speeds_raw[i]:5.1f}→{wind_speeds[i]:5.1f}m/s"
-                density_str = f"{density:6.3f}kg/m³"
-                k_str = f"{K:5.3f}"
-                corrected_wind_str = f"{corrected_wind_speed:5.1f}m/s"
-
-                # 高亮变化数据
-                if self.last_display_data[i]:
-                    last_temp, last_wind, last_density, last_k, last_corrected = self.last_display_data[i]
-
-                    # 温度变化
-                    if abs(rtd_temps[i] - last_temp) > 0.1:
-                        rtd_temp_str = f"{self.RED}{rtd_temps[i]:5.1f}℃{self.RESET}"
-
-                    # 风速变化
-                    if abs(wind_speeds[i] - last_wind) > 0.1:
-                        wind_str = f"{self.RED}{wind_speeds_raw[i]:5.1f}→{wind_speeds[i]:5.1f}m/s{self.RESET}"
-
-                    # 密度变化
-                    if abs(density - last_density) > 0.001:
-                        density_str = f"{self.RED}{density:6.3f}kg/m³{self.RESET}"
-
-                    # 修正系数变化
-                    if abs(K - last_k) > 0.01:
-                        k_str = f"{self.RED}{K:5.3f}{self.RESET}"
-
-                    # 修正后风速变化
-                    if abs(corrected_wind_speed - last_corrected) > 0.1:
-                        corrected_wind_str = f"{self.RED}{corrected_wind_speed:5.1f}m/s{self.RESET}"
-
-                # 存储当前显示数据
+                # 存储当前显示数据（用于变化检测）
+                if not hasattr(self, 'last_display_data'):
+                    self.last_display_data = [None] * 4
                 self.last_display_data[i] = (rtd_temps[i], wind_speeds[i], density, K, corrected_wind_speed)
-
-                # 构建显示行 - 显示修正前后的对比
-                line = f"  RTD{i+5:02d}: {rtd_temp_str} | 风速{i+1}: {wind_str} | K值:{k_str} | 修正后:{corrected_wind_str} | 空气密度: {density_str}"
-                display_lines.append(line)
-
-            # 打印4个传感器的数据
-            for line in display_lines:
-                print(line)
-
-            print()  # 空行分隔
 
             # 更新绘图数据
             with self.shared_data.lock:
@@ -630,7 +556,11 @@ class DataProcessor:
                     self.shared_data.wind_filtered_history[i].append(wind_speeds[i])
                     self.shared_data.wind_corrected_history[i].append(corrected_wind_speeds[i])
 
-            # 等待下一次显示
+            # 每10次计算打印一次状态（避免控制台输出过多）
+            if display_count % 10 == 0:
+                print(f"已处理 {display_count} 次数据 | 最新压力: {pressure:5.1f}kPa | 湿度: {humidity:5.1f}%")
+
+            # 等待下一次计算
             for _ in range(10):  # 1秒间隔，每0.1秒检查一次
                 if not self.running:
                     break
@@ -650,22 +580,39 @@ class WindSpeedPlotter:
             plt.style.use('seaborn-v0_8-darkgrid')
         except:
             plt.style.use('default')
-        self.fig, self.axes = plt.subplots(2, 2, figsize=(15, 10))
-        self.fig.suptitle('风速实时监测 - 原始值/滤波值/修正后', fontsize=16)
+
+        # 创建更大的图形窗口，更容易看到
+        self.fig, self.axes = plt.subplots(2, 2, figsize=(16, 12))
+        self.fig.suptitle('风速实时监测 - 原始值(红)/滤波后(蓝)/修正后(绿)', fontsize=18, fontweight='bold')
 
         # 在远程环境中尝试置顶窗口
-        self.fig.canvas.manager.set_window_title('风速实时监测 - 如果看不到窗口，请检查任务栏')
-
-        # 调整窗口位置
         try:
-            # 获取屏幕尺寸
-            manager = self.fig.canvas.manager
-            manager.window.wm_geometry("+50+50")  # 设置窗口位置
-            manager.window.attributes('-topmost', True)  # 置顶
-            manager.window.lift()  # 提升到前台
-            manager.window.attributes('-topmost', False)  # 取消置顶
+            self.fig.canvas.manager.set_window_title('=== 风速实时监测窗口 === 如果看不到，请检查任务栏或按Alt+Tab')
         except:
-            pass  # 忽略错误，继续执行
+            pass
+
+        # 调整窗口位置和大小
+        try:
+            manager = self.fig.canvas.manager
+            # 设置窗口位置（在屏幕左上角）
+            manager.window.wm_geometry("+100+100")
+            # 设置窗口最小大小
+            manager.window.minsize(800, 600)
+
+            # 尝试置顶
+            try:
+                manager.window.attributes('-topmost', True)
+                manager.window.lift()
+                manager.window.focus_force()
+                time.sleep(0.5)  # 等待窗口显示
+                manager.window.attributes('-topmost', False)
+            except:
+                pass
+        except:
+            pass
+
+        # 添加背景色，使窗口更醒目
+        self.fig.patch.set_facecolor('#f0f0f0')
 
         # 扁平化axes数组以便于索引
         self.axes = self.axes.flatten()
@@ -680,25 +627,31 @@ class WindSpeedPlotter:
         self.lines_corrected = []
 
         for i, ax in enumerate(self.axes):
-            ax.set_title(self.titles[i])
-            ax.set_xlabel('时间 (秒)')
-            ax.set_ylabel('风速 (m/s)')
+            ax.set_title(self.titles[i], fontsize=14, fontweight='bold', pad=10)
+            ax.set_xlabel('时间 (秒)', fontsize=11)
+            ax.set_ylabel('风速 (m/s)', fontsize=11)
             ax.grid(True, alpha=0.3)
 
-            # 创建三条线
-            line_raw, = ax.plot([], [], 'r-', label='原始值', alpha=0.7, linewidth=1)
-            line_filtered, = ax.plot([], [], 'b-', label='滤波后', linewidth=2)
-            line_corrected, = ax.plot([], [], 'g-', label='修正后', linewidth=2)
+            # 设置子图背景色
+            ax.set_facecolor('#ffffff')
+
+            # 创建三条线 - 使用更醒目的颜色
+            line_raw, = ax.plot([], [], 'r-', label='原始值', alpha=0.7, linewidth=1.5, marker='.', markersize=3)
+            line_filtered, = ax.plot([], [], 'b-', label='滤波后', linewidth=2.5, marker='o', markersize=2)
+            line_corrected, = ax.plot([], [], 'g-', label='修正后', linewidth=2.5, marker='s', markersize=2)
 
             self.lines_raw.append(line_raw)
             self.lines_filtered.append(line_filtered)
             self.lines_corrected.append(line_corrected)
 
-            # 添加图例
-            ax.legend(loc='upper right')
+            # 添加图例 - 放在左上角，避免遮挡数据
+            ax.legend(loc='upper left', fontsize=10, framealpha=0.9)
 
-            # 设置y轴范围
-            ax.set_ylim(-5, 20)
+            # 设置y轴范围 - 更合理的范围
+            ax.set_ylim(-2, 15)
+
+            # 添加零线
+            ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
 
         # 调整子图间距
         plt.tight_layout()
@@ -709,6 +662,16 @@ class WindSpeedPlotter:
         with self.shared_data.lock:
             if len(self.shared_data.time_history) > 0:
                 time_data = list(self.shared_data.time_history)
+
+                # 更新标题，显示当前状态
+                current_time = time.strftime("%H:%M:%S", time.localtime())
+                pressure = self.shared_data.analog_pressure
+                humidity = self.shared_data.analog_humidity
+                self.fig.suptitle(
+                    f'风速实时监测 - 原始值(红)/滤波后(蓝)/修正后(绿) | '
+                    f'时间: {current_time} | 压力: {pressure:.1f}kPa | 湿度: {humidity:.1f}%',
+                    fontsize=16, fontweight='bold'
+                )
 
                 for i in range(4):
                     # 获取风速数据
@@ -727,16 +690,31 @@ class WindSpeedPlotter:
                     self.lines_filtered[i].set_data(relative_time, filtered_data)
                     self.lines_corrected[i].set_data(relative_time, corrected_data)
 
-                    # 自动调整x轴范围
+                    # 自动调整x轴范围 - 显示最近60秒
                     if relative_time:
                         self.axes[i].set_xlim(max(0, relative_time[-1] - 60), relative_time[-1] + 1)
 
-                        # 自动调整y轴范围
+                        # 自动调整y轴范围 - 稍微留些空间
                         all_data = raw_data + filtered_data + corrected_data
                         if all_data:
-                            y_min = min(all_data) - 1
-                            y_max = max(all_data) + 1
+                            y_min = min(all_data) - 0.5
+                            y_max = max(all_data) + 0.5
+                            # 确保最小范围
+                            if y_max - y_min < 5:
+                                center = (y_max + y_min) / 2
+                                y_min = center - 2.5
+                                y_max = center + 2.5
                             self.axes[i].set_ylim(y_min, y_max)
+
+                        # 在标题中显示最新值
+                        if len(raw_data) > 0 and len(filtered_data) > 0 and len(corrected_data) > 0:
+                            latest_title = (
+                                f'{self.titles[i]}\n'
+                                f'最新: 原始={raw_data[-1]:.2f} | '
+                                f'滤波={filtered_data[-1]:.2f} | '
+                                f'修正={corrected_data[-1]:.2f} m/s'
+                            )
+                            self.axes[i].set_title(latest_title, fontsize=12, fontweight='bold', pad=10)
 
         return self.lines_raw + self.lines_filtered + self.lines_corrected
 
@@ -786,17 +764,26 @@ def main():
     # 创建共享数据对象
     shared_data = SharedData()
 
-    # 创建读取器、处理器和绘图器
+    # 创建读取器和处理器
     analog_reader = AnalogSensorReader(shared_data)
     rtd_reader = RTDTemperatureReader(shared_data)
     processor = DataProcessor(shared_data)
-    plotter = WindSpeedPlotter(shared_data)
+
+    # 尝试创建绘图器（如果matplotlib可用）
+    plotter = None
+    plotter_thread = None
+    try:
+        plotter = WindSpeedPlotter(shared_data)
+        plotter_thread = threading.Thread(target=plotter.run)
+        print(f"{processor.GREEN}✅ 已启用matplotlib实时绘图{processor.RESET}")
+    except Exception as e:
+        print(f"{processor.YELLOW}⚠️  绘图功能不可用: {str(e)}{processor.RESET}")
+        print(f"{processor.YELLOW}   数据将只在控制台显示{processor.RESET}")
 
     # 创建线程
     analog_thread = threading.Thread(target=analog_reader.run)
     rtd_thread = threading.Thread(target=rtd_reader.run)
     processor_thread = threading.Thread(target=processor.run)
-    plotter_thread = threading.Thread(target=plotter.run)
 
     try:
         # 连接设备
@@ -821,23 +808,32 @@ def main():
         rtd_thread.start()
         time.sleep(0.5)  # 等待数据稳定
         processor_thread.start()
-        time.sleep(1)  # 等待一些数据累积
-        plotter_thread.start()
 
-        # 等待绘图窗口创建
-        time.sleep(2)
-        print("\n" + "="*90)
-        print("💡 提示：如果看不到绘图窗口，请：")
-        print("   1. 检查任务栏是否有'风速实时监测'窗口")
-        print("   2. 按Alt+Tab切换窗口")
-        print("   3. 如果窗口被最小化，请从任务栏恢复")
-        print("="*90 + "\n")
+        # 如果绘图器可用，启动它
+        if plotter_thread:
+            print("\n" + "="*90)
+            print(f"{processor.GREEN}📈 正在启动matplotlib绘图窗口...{processor.RESET}")
+            print("   ⚠️  请查看新弹出的窗口（标题：=== 风速实时监测窗口 ===）")
+            print("   💡 如果看不到窗口，请：")
+            print("      1. 按Alt+Tab查看所有窗口")
+            print("      2. 检查Windows任务栏")
+            print("      3. 窗口可能在后台，请切换到该窗口")
+            print("="*90 + "\n")
+
+            time.sleep(1)  # 等待一些数据累积
+            plotter_thread.start()
+
+            # 等待绘图窗口创建
+            time.sleep(3)  # 增加等待时间
+            print(f"{processor.GREEN}✅ 绘图窗口已启动！{processor.RESET}")
+            print(f"{processor.GREEN}   数据更新中...（控制台将只显示简要状态）{processor.RESET}\n")
 
         # 等待线程结束
         analog_thread.join()
         rtd_thread.join()
         processor_thread.join()
-        plotter_thread.join()
+        if plotter_thread:
+            plotter_thread.join()
 
     except KeyboardInterrupt:
         print(f"\n{analog_reader.YELLOW}⚠️  用户中断，正在停止程序...{analog_reader.RESET}")
@@ -846,16 +842,17 @@ def main():
         analog_reader.running = False
         rtd_reader.running = False
         processor.running = False
-        plotter.running = False
-
-        # 关闭matplotlib窗口
-        plt.close('all')
+        if plotter:
+            plotter.running = False
+            # 关闭matplotlib窗口
+            plt.close('all')
 
         # 等待线程结束
         analog_thread.join(timeout=2)
         rtd_thread.join(timeout=2)
         processor_thread.join(timeout=2)
-        plotter_thread.join(timeout=2)
+        if plotter_thread:
+            plotter_thread.join(timeout=2)
 
     # 最终统计报告
     print("\n" + "="*90)
