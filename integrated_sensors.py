@@ -193,9 +193,6 @@ class AnalogSensorReader:
 
             # 提取数据
             registers = parsed_data["registers"]
-            # 打印调试信息
-            print(f"[模拟量传感器] [{current_time}] 📊 接收到 {len(registers)} 个寄存器数据: {registers[:10]}{'...' if len(registers)>10 else ''}")
-
             # 只需要确保至少有足够的基本数据（温度和压力）
             min_required = 2  # 至少需要温度和压力
             if len(registers) < min_required:
@@ -267,6 +264,18 @@ class AnalogSensorReader:
             wind_strs = []
             wind_raw_strs = []
 
+            # 确保 wind_strs 总是有4个元素
+            for i in range(4):
+                if i < len(wind_speeds):
+                    wind_strs.append(f"{wind_speeds_raw[i]:5.1f}→{wind_speeds[i]:5.1f}m/s")
+                    if 4+i < len(registers):
+                        wind_raw_strs.append(f"{registers[4+i]:4d}")
+                    else:
+                        wind_raw_strs.append(f"    ")
+                else:
+                    wind_strs.append(f"    0.0→    0.0m/s")
+                    wind_raw_strs.append(f"    ")
+
             if self.last_registers and len(self.last_registers) > 0:
                 # 检查温度变化
                 if len(self.last_registers) > 0:
@@ -302,14 +311,11 @@ class AnalogSensorReader:
                         last_current = self.last_registers[4+i] / 249
                         last_wind = (last_current - 4) * 30 / 16
                         if abs(wind - last_wind) > 0.1:
-                            wind_strs.append(f"{self.RED}{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s{self.RESET}")
-                            wind_raw_strs.append(f"{self.RED}{registers[4+i]:4d}{self.RESET}")
-                        else:
-                            wind_strs.append(f"{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s")
-                            wind_raw_strs.append(f"{registers[4+i]:4d}")
-                    else:
-                        wind_strs.append(f"{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s")
-                        wind_raw_strs.append(f"    ")
+                            # 更新 wind_strs 中对应的元素
+                            if i < len(wind_strs):
+                                wind_strs[i] = f"{self.RED}{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s{self.RESET}"
+                            if i < len(wind_raw_strs):
+                                wind_raw_strs[i] = f"{self.RED}{registers[4+i]:4d}{self.RESET}"
 
             # 打印结果
             output_line = f"[{current_time}] [模拟量] ✅ 第{self.read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
