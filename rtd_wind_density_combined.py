@@ -8,6 +8,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.widgets import CheckButtons
 from collections import deque
 from kalman_filter import create_wind_speed_filter
 from typing import List, Optional, Tuple
@@ -147,9 +148,13 @@ class RTDWindDensityCombined:
         self.fail_count = 0
         self.start_time = time.time()
 
-        # Setup matplotlib - Single plot
+        # Setup matplotlib - Single plot with checkboxes
         plt.style.use('default')
-        self.fig, self.ax = plt.subplots(figsize=(14, 8))
+        # Create figure with space for checkboxes
+        self.fig = plt.figure(figsize=(16, 8))
+        # Main plot takes left part
+        self.ax = plt.subplot2grid((4, 10), (0, 0), colspan=7, rowspan=4)
+
         self.fig.suptitle('RTD Wind Speed Monitoring with Air Density Correction - Combined View\n'
                          f'Calibration: {self.CALIBRATION_TEMP}°C, {self.CALIBRATION_RH*100}%RH, {self.CALIBRATION_PRESSURE}kPa',
                          fontsize=14, fontweight='bold')
@@ -196,30 +201,51 @@ class RTDWindDensityCombined:
         self.ax.set_ylabel('Wind Speed (m/s)', fontsize=12)
         self.ax.grid(True, alpha=0.3)
 
-        # Create legend - organize by sensor
-        # Create custom legend handles
-        from matplotlib.lines import Line2D
-        legend_elements = []
-        for i in range(4):
-            legend_elements.append(Line2D([0], [0], color=self.colors[i], alpha=0.4,
-                                         linestyle='--', label=f'{self.sensor_labels[i]} Raw'))
-            legend_elements.append(Line2D([0], [0], color=self.colors[i], linewidth=2,
-                                         label=f'{self.sensor_labels[i]} Filtered'))
-            legend_elements.append(Line2D([0], [0], color='red', linewidth=2.5, alpha=0.7,
-                                         label=f'{self.sensor_labels[i]} Corrected'))
-
-        # Add legend outside the plot area
-        self.ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1.02, 0.5),
-                      ncol=1, fontsize=9)
-
-        # Adjust layout to make room for legend
-        plt.tight_layout(rect=[0, 0, 0.85, 0.96])  # Leave space on right for legend
-
         # Set initial y-axis range
         self.ax.set_ylim(-2, 25)
 
+        # Create checkboxes
+        # Checkbox area takes right part
+        checkbox_ax = plt.subplot2grid((4, 10), (0, 8), colspan=2, rowspan=4)
+        checkbox_ax.axis('off')
+
+        # Prepare labels for checkboxes
+        labels = []
+        for i in range(4):
+            labels.append(f'{self.sensor_labels[i]} Raw')
+            labels.append(f'{self.sensor_labels[i]} Filtered')
+            labels.append(f'{self.sensor_labels[i]} Corrected')
+
+        # Create checkbox
+        self.check = CheckButtons(checkbox_ax, labels,
+                                  [True] * 12)  # All checked by default
+
+        # Connect checkbox to function
+        self.check.on_clicked(self.update_visibility)
+
+        # Make all lines accessible by name
+        self.all_lines = []
+        for i in range(4):
+            self.all_lines.append(self.lines_raw[i])
+            self.all_lines.append(self.lines_filtered[i])
+            self.all_lines.append(self.lines_corrected[i])
+
         # Connect to devices
         self.connect_devices()
+
+    def update_visibility(self, label):
+        """Update visibility of lines based on checkbox state"""
+        # Get the index of the clicked label
+        index = self.check.labels.index(label)
+
+        # Toggle visibility
+        if self.check.get_status()[index]:
+            self.all_lines[index].set_visible(True)
+        else:
+            self.all_lines[index].set_visible(False)
+
+        # Redraw
+        self.fig.canvas.draw_idle()
 
     def connect_devices(self) -> bool:
         """Connect to both wind sensor and RTD devices"""
@@ -514,16 +540,17 @@ class RTDWindDensityCombined:
     def start(self):
         """Start real-time plotting"""
         print("\n" + "="*60)
-        print("RTD Wind Speed Monitoring System - Combined Plot View")
+        print("RTD Wind Speed Monitoring System - Interactive Plot View")
         print("="*60)
         print(f"Wind device: {self.WIND_DEVICE_IP}:{self.WIND_DEVICE_PORT}")
         print(f"RTD device: {self.RTD_DEVICE_IP}:{self.RTD_DEVICE_PORT}")
         print(f"Calibration: {self.CALIBRATION_TEMP}°C, {self.CALIBRATION_RH*100}%RH, {self.CALIBRATION_PRESSURE}kPa")
         print(f"Calibration density: {self.calibration_density:.3f} kg/m³")
-        print("Display: All 4 sensors on single plot")
+        print("Display: All 4 sensors on single plot with interactive checkboxes")
         print("  - Dashed lines: Raw data")
         print("  - Colored solid lines: Filtered data")
         print("  - Red solid lines: Density corrected data")
+        print("\nUse checkboxes on the right to toggle visibility of each data line")
         print("Press Ctrl+C to stop")
         print("="*60)
 
