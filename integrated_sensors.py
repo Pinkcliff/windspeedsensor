@@ -82,7 +82,7 @@ class AnalogSensorReader:
         self.SLAVE_ADDR = 1               # 设备从站地址
         self.FUNC_CODE = 0x04             # 功能码
         self.START_REG = 0                # 起始寄存器地址
-        self.REG_COUNT = 12               # 读取寄存器数量（增加第11路和第12路）
+        self.REG_COUNT = 12               # 读取寄存器数量（尝试读取12个）
         self.READ_INTERVAL = 0.1          # 读取间隔（秒）
         self.TIMEOUT = 1                  # 单次读写超时时间（缩短为1秒以便快速响应停止）
         self.BUFFER_SIZE = 1024
@@ -193,37 +193,52 @@ class AnalogSensorReader:
 
             # 提取数据
             registers = parsed_data["registers"]
-            if len(registers) < self.REG_COUNT:
-                print(f"[模拟量传感器] [{current_time}] ❌ 第{self.read_count:03d}次: 数据不足（实际{len(registers)}个，期望{self.REG_COUNT}个）")
+            # 只需要确保至少有足够的基本数据（温度和压力）
+            min_required = 2  # 至少需要温度和压力
+            if len(registers) < min_required:
+                print(f"[模拟量传感器] [{current_time}] ❌ 第{self.read_count:03d}次: 数据不足（实际{len(registers)}个，至少需要{min_required}个）")
                 self.fail_count += 1
                 return None
 
             # 数据转换
             # 第1路：温度传感器
-            temp_raw = registers[0]
-            temp_current = temp_raw / 249  # 转换为电流值(mA)
-            temperature = (temp_current - 4) * 7.5 - 40
+            temperature = 0.0  # 默认值
+            temp_raw = 0  # 默认值
+            if len(registers) > 0:
+                temp_raw = registers[0]
+                temp_current = temp_raw / 249  # 转换为电流值(mA)
+                temperature = (temp_current - 4) * 7.5 - 40
 
             # 第2路：压力传感器
-            pressure_raw = registers[1]
-            pressure_current = pressure_raw / 249  # 转换为电流值(mA)
-            pressure = (pressure_current - 4) * 7.5
+            pressure = 0.0  # 默认值
+            pressure_raw = 0  # 默认值
+            if len(registers) > 1:
+                pressure_raw = registers[1]
+                pressure_current = pressure_raw / 249  # 转换为电流值(mA)
+                pressure = (pressure_current - 4) * 7.5
 
             # 第5-8路：风速传感器（应用卡尔曼滤波）
             wind_speeds = []
             wind_speeds_raw = []
             for i in range(4, 8):
-                raw_value = registers[i]
-                current_value = raw_value / 249
-                wind_speed_raw = (current_value - 4) * 30 / 16
-                wind_speed = self.wind_filters[i-4].update(wind_speed_raw)
-                wind_speeds.append(wind_speed)
-                wind_speeds_raw.append(wind_speed_raw)
+                if i < len(registers):  # 检查索引是否有效
+                    raw_value = registers[i]
+                    current_value = raw_value / 249
+                    wind_speed_raw = (current_value - 4) * 30 / 16
+                    wind_speed = self.wind_filters[i-4].update(wind_speed_raw)
+                    wind_speeds.append(wind_speed)
+                    wind_speeds_raw.append(wind_speed_raw)
+                else:
+                    wind_speeds.append(0.0)  # 默认值
+                    wind_speeds_raw.append(0.0)
 
             # 第11路：湿度传感器（索引10）
-            humidity_raw = registers[10]
-            humidity_current = humidity_raw / 249  # 转换为电流值(mA)
-            humidity = (humidity_current - 4) * 100 / 16  # 湿度计算公式
+            humidity = 0.0  # 默认值
+            humidity_raw = 0  # 默认值
+            if len(registers) > 10:  # 检查是否有第11个寄存器（索引10）
+                humidity_raw = registers[10]
+                humidity_current = humidity_raw / 249  # 转换为电流值(mA)
+                humidity = (humidity_current - 4) * 100 / 16  # 湿度计算公式
 
             # 使用AIR类计算空气密度（使用实际湿度）
             try:
@@ -265,11 +280,12 @@ class AnalogSensorReader:
                     pressure_raw_str = f"{self.RED}{pressure_raw:4d}{self.RESET}"
 
                 # 检查湿度变化
-                last_humidity_current = self.last_registers[10] / 249
-                last_humidity = (last_humidity_current - 4) * 100 / 16
-                if abs(humidity - last_humidity) > 1:
-                    humidity_str = f"{self.RED}{humidity:5.1f}%{self.RESET}"
-                    humidity_raw_str = f"{self.RED}{humidity_raw:4d}{self.RESET}"
+                if len(self.last_registers) > 10 and len(registers) > 10:
+                    last_humidity_current = self.last_registers[10] / 249
+                    last_humidity = (last_humidity_current - 4) * 100 / 16
+                    if abs(humidity - last_humidity) > 1:
+                        humidity_str = f"{self.RED}{humidity:5.1f}%{self.RESET}"
+                        humidity_raw_str = f"{self.RED}{humidity_raw:4d}{self.RESET}"
 
                 # 检查空气密度变化
                 if abs(air_density - self.last_air_density) > 0.01:
@@ -277,14 +293,18 @@ class AnalogSensorReader:
 
                 # 检查风速变化
                 for i, wind in enumerate(wind_speeds):
-                    last_current = self.last_registers[4+i] / 249
-                    last_wind = (last_current - 4) * 30 / 16
-                    if abs(wind - last_wind) > 0.1:
-                        wind_strs.append(f"{self.RED}{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s{self.RESET}")
-                        wind_raw_strs.append(f"{self.RED}{registers[4+i]:4d}{self.RESET}")
+                    if len(self.last_registers) > (4+i) and len(registers) > (4+i):
+                        last_current = self.last_registers[4+i] / 249
+                        last_wind = (last_current - 4) * 30 / 16
+                        if abs(wind - last_wind) > 0.1:
+                            wind_strs.append(f"{self.RED}{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s{self.RESET}")
+                            wind_raw_strs.append(f"{self.RED}{registers[4+i]:4d}{self.RESET}")
+                        else:
+                            wind_strs.append(f"{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s")
+                            wind_raw_strs.append(f"{registers[4+i]:4d}")
                     else:
                         wind_strs.append(f"{wind_speeds_raw[i]:5.1f}→{wind:5.1f}m/s")
-                        wind_raw_strs.append(f"{registers[4+i]:4d}")
+                        wind_raw_strs.append(f"    ")
 
             # 打印结果
             output_line = f"[{current_time}] [模拟量] ✅ 第{self.read_count:03d}次 | 耗时:{read_duration:4.0f}ms | "
