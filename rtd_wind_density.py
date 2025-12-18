@@ -4,6 +4,18 @@ from typing import List, Dict, Optional
 from Refrigerant import AIR
 from kalman_filter import create_wind_speed_filter
 import threading
+import matplotlib
+import sys
+
+# 尝试不同的后端
+try:
+    matplotlib.use('TkAgg')  # 首选TkAgg
+except:
+    try:
+        matplotlib.use('Qt5Agg')  # 备选Qt5
+    except:
+        matplotlib.use('Agg')  # 最后使用Agg（无GUI）
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
@@ -718,15 +730,29 @@ class WindSpeedPlotter:
         """运行绘图"""
         self.running = True
 
+        print(f"\n{self.GREEN}📈 启动实时绘图窗口...{self.RESET}")
+
         # 创建动画
         self.ani = animation.FuncAnimation(
             self.fig, self.update_plot,
             interval=100,  # 每100ms更新一次
-            blit=True,
+            blit=False,  # 改为False以确保兼容性
             cache_frame_data=False
         )
 
-        plt.show()
+        try:
+            plt.show(block=True)
+        except Exception as e:
+            print(f"绘图窗口错误: {e}")
+            print("尝试使用非阻塞模式...")
+            plt.show(block=False)
+
+            # 手动保持窗口打开
+            while self.running:
+                try:
+                    plt.pause(0.1)
+                except:
+                    break
 
 
 # --------------------------
