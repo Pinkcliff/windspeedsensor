@@ -193,6 +193,9 @@ class AnalogSensorReader:
 
             # 提取数据
             registers = parsed_data["registers"]
+            # 打印调试信息
+            print(f"[模拟量传感器] [{current_time}] 📊 接收到 {len(registers)} 个寄存器数据: {registers[:10]}{'...' if len(registers)>10 else ''}")
+
             # 只需要确保至少有足够的基本数据（温度和压力）
             min_required = 2  # 至少需要温度和压力
             if len(registers) < min_required:
@@ -264,20 +267,22 @@ class AnalogSensorReader:
             wind_strs = []
             wind_raw_strs = []
 
-            if self.last_registers:
+            if self.last_registers and len(self.last_registers) > 0:
                 # 检查温度变化
-                last_temp_current = self.last_registers[0] / 249
-                last_temp = (last_temp_current - 4) * 7.5 - 40
-                if abs(temperature - last_temp) > 0.1:
-                    temp_str = f"{self.RED}{temperature:5.1f}℃{self.RESET}"
-                    temp_raw_str = f"{self.RED}{temp_raw:4d}{self.RESET}"
+                if len(self.last_registers) > 0:
+                    last_temp_current = self.last_registers[0] / 249
+                    last_temp = (last_temp_current - 4) * 7.5 - 40
+                    if abs(temperature - last_temp) > 0.1:
+                        temp_str = f"{self.RED}{temperature:5.1f}℃{self.RESET}"
+                        temp_raw_str = f"{self.RED}{temp_raw:4d}{self.RESET}"
 
                 # 检查压力变化
-                last_pressure_current = self.last_registers[1] / 249
-                last_pressure = (last_pressure_current - 4) * 7.5
-                if abs(pressure - last_pressure) > 0.1:
-                    pressure_str = f"{self.RED}{pressure:5.1f}kPa{self.RESET}"
-                    pressure_raw_str = f"{self.RED}{pressure_raw:4d}{self.RESET}"
+                if len(self.last_registers) > 1:
+                    last_pressure_current = self.last_registers[1] / 249
+                    last_pressure = (last_pressure_current - 4) * 7.5
+                    if abs(pressure - last_pressure) > 0.1:
+                        pressure_str = f"{self.RED}{pressure:5.1f}kPa{self.RESET}"
+                        pressure_raw_str = f"{self.RED}{pressure_raw:4d}{self.RESET}"
 
                 # 检查湿度变化
                 if len(self.last_registers) > 10 and len(registers) > 10:
@@ -347,7 +352,14 @@ class AnalogSensorReader:
             print(f"[模拟量传感器] [{current_time}] {self.RED}❌ 第{self.read_count:03d}次: 网络错误 - {str(e)}{self.RESET}")
             self.fail_count += 1
         except Exception as e:
+            # 捕获所有其他异常，避免程序崩溃
+            import traceback
             print(f"[模拟量传感器] [{current_time}] {self.RED}❌ 第{self.read_count:03d}次: 未知异常 - {str(e)}（{type(e).__name__}）{self.RESET}")
+            print(f"[模拟量传感器] 详细错误信息:")
+            traceback.print_exc()
+            if 'registers' in locals():
+                print(f"[模拟量传感器] 寄存器数组长度: {len(registers)}")
+                print(f"[模拟量传感器] 寄存器内容: {registers}")
             self.fail_count += 1
 
         return None
