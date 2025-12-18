@@ -236,7 +236,13 @@ class RTDWindDensityCombined:
     def update_visibility(self, label):
         """Update visibility of lines based on checkbox state"""
         # Get the index of the clicked label
-        index = self.check.labels.index(label)
+        # CheckButtons stores labels as Text objects
+        for i, text_obj in enumerate(self.check.labels):
+            if text_obj.get_text() == label:
+                index = i
+                break
+        else:
+            return  # Label not found
 
         # Toggle visibility
         if self.check.get_status()[index]:
