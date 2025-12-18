@@ -653,6 +653,20 @@ class WindSpeedPlotter:
         self.fig, self.axes = plt.subplots(2, 2, figsize=(15, 10))
         self.fig.suptitle('风速实时监测 - 原始值/滤波值/修正后', fontsize=16)
 
+        # 在远程环境中尝试置顶窗口
+        self.fig.canvas.manager.set_window_title('风速实时监测 - 如果看不到窗口，请检查任务栏')
+
+        # 调整窗口位置
+        try:
+            # 获取屏幕尺寸
+            manager = self.fig.canvas.manager
+            manager.window.wm_geometry("+50+50")  # 设置窗口位置
+            manager.window.attributes('-topmost', True)  # 置顶
+            manager.window.lift()  # 提升到前台
+            manager.window.attributes('-topmost', False)  # 取消置顶
+        except:
+            pass  # 忽略错误，继续执行
+
         # 扁平化axes数组以便于索引
         self.axes = self.axes.flatten()
 
@@ -809,6 +823,15 @@ def main():
         processor_thread.start()
         time.sleep(1)  # 等待一些数据累积
         plotter_thread.start()
+
+        # 等待绘图窗口创建
+        time.sleep(2)
+        print("\n" + "="*90)
+        print("💡 提示：如果看不到绘图窗口，请：")
+        print("   1. 检查任务栏是否有'风速实时监测'窗口")
+        print("   2. 按Alt+Tab切换窗口")
+        print("   3. 如果窗口被最小化，请从任务栏恢复")
+        print("="*90 + "\n")
 
         # 等待线程结束
         analog_thread.join()
