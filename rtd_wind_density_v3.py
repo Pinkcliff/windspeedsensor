@@ -9,7 +9,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from collections import deque
+from pathlib import Path
+from datetime import datetime
 from kalman_filter import create_wind_speed_filter
+
+# ==============================================================================
+# 滤波器选择 - 在此切换不同的滤波器
+# ==============================================================================
+# 可选滤波器类型:
+#   "Original"        - 原始滤波器 (create_wind_speed_filter)
+#   "StrongSmoothing" - 强化平滑滤波器 (平滑度最高，响应较慢)
+#   "DualStage"       - 双级滤波器 (综合优化)
+#   "RobustOutlier"   - 异常值剔除滤波器 (抗突变干扰)
+FILTER_TYPE = "RobustOutlier"
+
+
+if FILTER_TYPE == "StrongSmoothing":
+    from kalman_filter import StrongSmoothingFilter as WindFilter
+elif FILTER_TYPE == "DualStage":
+    from kalman_filter import DualStageFilter as WindFilter
+elif FILTER_TYPE == "RobustOutlier":
+    from kalman_filter import RobustOutlierFilter as WindFilter
+else:
+    # Original - 使用原始函数
+    WindFilter = None
+# ==============================================================================
 from typing import List, Optional, Tuple
 from Refrigerant import AIR
 
@@ -132,8 +156,11 @@ class RTDWindDensityPlotter:
         self.humidity_data = deque()
         self.density_data = deque()
 
-        # Kalman filters for wind speeds
-        self.wind_filters = [create_wind_speed_filter() for _ in range(4)]
+        # Kalman filters for wind speeds - 根据 FILTER_TYPE 选择滤波器
+        if FILTER_TYPE == "Original" or WindFilter is None:
+            self.wind_filters = [create_wind_speed_filter() for _ in range(4)]
+        else:
+            self.wind_filters = [WindFilter() for _ in range(4)]
 
         # Connection objects
         self.wind_sock: Optional[socket.socket] = None
@@ -146,6 +173,10 @@ class RTDWindDensityPlotter:
         self.success_count = 0
         self.fail_count = 0
         self.start_time = time.time()
+
+        # Data log file (每次启动时清除旧内容)
+        self.log_file_path = Path("wind_data_log.csv")
+        self._init_log_file()
 
         # Setup matplotlib (following plot_wind_speed.py pattern)
         plt.style.use('default')
@@ -175,8 +206,8 @@ class RTDWindDensityPlotter:
 
             # Create line objects
             line_raw, = ax.plot([], [], color=colors[i], alpha=0.4, linewidth=1, label='Raw')
-            line_filtered, = ax.plot([], [], color=colors[i], linewidth=2, label='Filtered')
-            line_corrected, = ax.plot([], [], color='red', linewidth=2.5, label='Density Corrected')
+            line_filtered, = ax.plot([], [], color=colors[i], linewidth=1, label='Filtered')
+            line_corrected, = ax.plot([], [], color='red', linewidth=1, label='Density Corrected')
 
             self.lines_raw.append(line_raw)
             self.lines_filtered.append(line_filtered)
@@ -202,6 +233,28 @@ class RTDWindDensityPlotter:
 
         # Connect to devices
         self.connect_devices()
+
+    def _init_log_file(self):
+        """初始化日志文件，每次启动时清除旧内容"""
+        try:
+            with open(self.log_file_path, 'w', encoding='utf-8') as f:
+                # 写入CSV表头
+                header = "Timestamp,Time(s),Sensor,Raw(m/s),Filtered(m/s),Corrected(m/s),RTD(C),Pressure(kPa),Humidity(%RH),Density(kg/m3),K_factor\n"
+                f.write(header)
+            print(f"日志文件已初始化: {self.log_file_path.absolute()}")
+        except Exception as e:
+            print(f"日志文件初始化失败: {e}")
+
+    def _write_log(self, current_time, sensor_idx, raw, filtered, corrected, rtd_temp, pressure, humidity, density, k_factor):
+        """写入数据到日志文件"""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                line = f"{timestamp},{current_time:.3f},{sensor_idx+1},{raw:.4f},{filtered:.4f},{corrected:.4f},{rtd_temp:.2f},{pressure:.3f},{humidity:.2f},{density:.4f},{k_factor:.4f}\n"
+                f.write(line)
+        except Exception as e:
+            # 静默失败，不影响主程序
+            pass
 
     def connect_devices(self) -> bool:
         """Connect to both wind sensor and RTD devices"""
@@ -404,7 +457,7 @@ class RTDWindDensityPlotter:
                 wind_speed_filtered = self.wind_filters[i].update(wind_speeds_raw[i])
                 self.wind_filtered_data[i].append(wind_speed_filtered)
 
-                # Store RTD temperature
+                # Store RTD temperature (原始值，用于显示)
                 self.rtd_temp_data[i].append(rtd_temps[i])
 
                 # Calculate air density using RTD temperature
@@ -414,6 +467,10 @@ class RTDWindDensityPlotter:
                 K = (self.calibration_density / density) ** 0.5 if density > 0 else 1.0
                 wind_speed_corrected = wind_speed_filtered * K
                 self.wind_corrected_data[i].append(wind_speed_corrected)
+
+                # 写入日志文件
+                self._write_log(current_time, i, wind_speeds_raw[i], wind_speed_filtered,
+                               wind_speed_corrected, rtd_temps[i], pressure, humidity, density, K)
 
             # Store environmental data (using first sensor's values)
             self.pressure_data.append(pressure)

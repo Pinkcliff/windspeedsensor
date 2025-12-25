@@ -9,7 +9,7 @@ import numpy as np
 class KalmanFilter:
     """一维卡尔曼滤波器"""
 
-    def __init__(self, process_variance=1e-3, measurement_variance=1e-1, initial_estimate=0.0, initial_error=1.0):
+    def __init__(self, process_variance=1e-4, measurement_variance=5e-1, initial_estimate=0.0, initial_error=1.0):
         """
         初始化卡尔曼滤波器
 
@@ -181,8 +181,8 @@ def create_wind_speed_filter(initial_wind_speed=0.0):
         KalmanFilter实例
     """
     return KalmanFilter(
-        process_variance=1e-2,  # 风速变化可能较快
-        measurement_variance=1.0,  # 风速测量噪声较大
+        process_variance=1e-4,  # 风速变化可能较快
+        measurement_variance=0.1,  # 风速测量噪声较大
         initial_estimate=initial_wind_speed,
         initial_error=1.0
     )
@@ -224,3 +224,109 @@ if __name__ == "__main__":
     print(f"原始数据标准差: {raw_std:.3f}")
     print(f"滤波后标准差: {filtered_std:.3f}")
     print(f"噪声减少: {((raw_std - filtered_std) / raw_std * 100):.1f}%")
+
+
+# ==============================================================================
+# 增强型滤波器 - 用于风速数据处理
+# ==============================================================================
+
+class StrongSmoothingFilter:
+    """
+    强化平滑滤波器
+    通过调整Q/R参数实现更平滑的滤波效果
+    适用于抖动严重的数据
+    """
+    def __init__(self, initial_wind_speed=0.0):
+        self.kalman = KalmanFilter(
+            process_variance=5e-5,      # 极小的过程噪声
+            measurement_variance=10.0,  # 很大的测量噪声
+            initial_estimate=initial_wind_speed,
+            initial_error=1.0
+        )
+
+    def update(self, measurement):
+        return self.kalman.update(measurement)
+
+
+class DualStageFilter:
+    """
+    双级滤波器
+    第一级快速去除高频噪声，第二级深度平滑
+    适用于需要综合优化的场景
+    """
+    def __init__(self, initial_wind_speed=0.0):
+        # 第一级：快速响应
+        self.stage1 = KalmanFilter(
+            process_variance=5e-4,
+            measurement_variance=1.0,
+            initial_estimate=initial_wind_speed
+        )
+        # 第二级：深度平滑
+        self.stage2 = KalmanFilter(
+            process_variance=1e-5,
+            measurement_variance=5.0,
+            initial_estimate=initial_wind_speed
+        )
+
+    def update(self, measurement):
+        stage1_output = self.stage1.update(measurement)
+        return self.stage2.update(stage1_output)
+
+
+class RobustOutlierFilter:
+    """
+    自适应卡尔曼滤波器
+    根据采样值与滤波值的差异动态调整参数：
+    - 差异 > M值：使用大Q、大R快速逼近
+    - 差异 ≤ M值：使用小Q、小R强力平滑
+    """
+    def __init__(self, initial_wind_speed=0.0, max_diff=1.0):
+        """
+        参数:
+            initial_wind_speed: 初始风速估计值
+            max_diff: 采样值与滤波值的最大允许差异（M值）
+        """
+        self.max_diff = max_diff
+
+        # 快速逼近参数（差异大时使用）
+        self.Q_fast = 5e-2    # 大Q：快速响应
+        self.R_fast = 5.0     # 大R：对测量值中等信任
+
+        # 强力平滑参数（差异小时使用）
+        self.Q_slow = 1e-4    # 小Q：强力平滑
+        self.R_slow = 1.0     # 小R：对测量值高信任
+
+        # 初始化卡尔曼滤波器（使用快速参数开始）
+        self.kalman = KalmanFilter(
+            process_variance=self.Q_fast,
+            measurement_variance=self.R_fast,
+            initial_estimate=initial_wind_speed
+        )
+        self.last_filtered_value = initial_wind_speed
+
+    def update(self, measurement):
+        """
+        更新滤波器
+        参数:
+            measurement: 新的采样值
+        返回:
+            滤波后的值
+        """
+        # 计算采样值与当前滤波值的差异
+        diff = abs(measurement - self.last_filtered_value)
+
+        # 根据差异动态调整Q和R参数
+        if diff > self.max_diff:
+            # 差异大：快速逼近模式
+            self.kalman.Q = self.Q_fast
+            self.kalman.R = self.R_fast
+        else:
+            # 差异小：强力平滑模式
+            self.kalman.Q = self.Q_slow
+            self.kalman.R = self.R_slow
+
+        # 执行卡尔曼滤波更新
+        filtered = self.kalman.update(measurement)
+        self.last_filtered_value = filtered
+
+        return filtered

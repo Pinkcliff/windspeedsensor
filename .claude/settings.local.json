@@ -4,7 +4,8 @@
       "Bash(dir:*)",
       "Bash(python:*)",
       "Bash(git pull:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(powershell:*)"
     ]
   }
 }
