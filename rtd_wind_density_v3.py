@@ -162,6 +162,14 @@ class RTDWindDensityPlotter:
         else:
             self.wind_filters = [WindFilter() for _ in range(4)]
 
+        # 压力滤波器（平滑压力数据，消除K因子跳变）
+        from kalman_filter import create_pressure_filter
+        self.pressure_filter = create_pressure_filter(101.325)
+
+        # RTD温度滤波器（平滑RTD温度，消除K因子跳变）
+        from kalman_filter import create_temperature_filter
+        self.rtd_filters = [create_temperature_filter(23.1) for _ in range(4)]
+
         # Connection objects
         self.wind_sock: Optional[socket.socket] = None
         self.rtd_sock: Optional[socket.socket] = None
@@ -239,18 +247,18 @@ class RTDWindDensityPlotter:
         try:
             with open(self.log_file_path, 'w', encoding='utf-8') as f:
                 # 写入CSV表头
-                header = "Timestamp,Time(s),Sensor,Raw(m/s),Filtered(m/s),Corrected(m/s),RTD(C),Pressure(kPa),Humidity(%RH),Density(kg/m3),K_factor\n"
+                header = "Timestamp,Time(s),Sensor,Raw(m/s),Filtered(m/s),Corrected(m/s),RTD(C),Pressure(kPa),Humidity(%RH),Density(kg/m3),K_factor_raw,K_factor_filtered\n"
                 f.write(header)
             print(f"日志文件已初始化: {self.log_file_path.absolute()}")
         except Exception as e:
             print(f"日志文件初始化失败: {e}")
 
-    def _write_log(self, current_time, sensor_idx, raw, filtered, corrected, rtd_temp, pressure, humidity, density, k_factor):
+    def _write_log(self, current_time, sensor_idx, raw, filtered, corrected, rtd_temp, pressure, humidity, density, k_factor_raw, k_factor_filtered):
         """写入数据到日志文件"""
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             with open(self.log_file_path, 'a', encoding='utf-8') as f:
-                line = f"{timestamp},{current_time:.3f},{sensor_idx+1},{raw:.4f},{filtered:.4f},{corrected:.4f},{rtd_temp:.2f},{pressure:.3f},{humidity:.2f},{density:.4f},{k_factor:.4f}\n"
+                line = f"{timestamp},{current_time:.3f},{sensor_idx+1},{raw:.4f},{filtered:.4f},{corrected:.4f},{rtd_temp:.2f},{pressure:.3f},{humidity:.2f},{density:.4f},{k_factor_raw:.6f},{k_factor_filtered:.6f}\n"
                 f.write(line)
         except Exception as e:
             # 静默失败，不影响主程序
@@ -441,9 +449,12 @@ class RTDWindDensityPlotter:
 
             # Unpack data
             wind_speeds_raw = wind_result[0]
-            pressure = wind_result[1] if len(wind_result) > 1 else self.CALIBRATION_PRESSURE
+            pressure_raw = wind_result[1] if len(wind_result) > 1 else self.CALIBRATION_PRESSURE
             humidity = wind_result[2] if len(wind_result) > 2 else self.CALIBRATION_RH * 100
-            rtd_temps = rtd_result
+            rtd_temps_raw = rtd_result
+
+            # 对压力和RTD温度进行滤波，平滑K因子
+            pressure = self.pressure_filter.update(pressure_raw)
 
             # Add timestamp
             self.time_data.append(current_time)
@@ -457,26 +468,35 @@ class RTDWindDensityPlotter:
                 wind_speed_filtered = self.wind_filters[i].update(wind_speeds_raw[i])
                 self.wind_filtered_data[i].append(wind_speed_filtered)
 
+                # 对RTD温度进行滤波
+                rtd_temp_filtered = self.rtd_filters[i].update(rtd_temps_raw[i])
+
                 # Store RTD temperature (原始值，用于显示)
-                self.rtd_temp_data[i].append(rtd_temps[i])
+                self.rtd_temp_data[i].append(rtd_temps_raw[i])
 
-                # Calculate air density using RTD temperature
-                density = calculate_air_density(rtd_temps[i], pressure, humidity)
+                # 计算原始K因子（用原始RTD温度和原始压力）
+                density_raw = calculate_air_density(rtd_temps_raw[i], pressure_raw, humidity)
+                K_raw = (self.calibration_density / density_raw) ** 0.5 if density_raw > 0 else 1.0
 
-                # Calculate K factor and corrected wind speed
-                K = (self.calibration_density / density) ** 0.5 if density > 0 else 1.0
-                wind_speed_corrected = wind_speed_filtered * K
+                # Calculate air density using 滤波后的RTD温度和压力
+                density = calculate_air_density(rtd_temp_filtered, pressure, humidity)
+
+                # Calculate K factor and corrected wind speed（使用滤波后的K）
+                K_filtered = (self.calibration_density / density) ** 0.5 if density > 0 else 1.0
+                wind_speed_corrected = wind_speed_filtered * K_filtered
                 self.wind_corrected_data[i].append(wind_speed_corrected)
 
                 # 写入日志文件
                 self._write_log(current_time, i, wind_speeds_raw[i], wind_speed_filtered,
-                               wind_speed_corrected, rtd_temps[i], pressure, humidity, density, K)
+                               wind_speed_corrected, rtd_temps_raw[i], pressure, humidity, density, K_raw, K_filtered)
 
             # Store environmental data (using first sensor's values)
             self.pressure_data.append(pressure)
             self.humidity_data.append(humidity)
+            # 使用滤波后的RTD温度计算环境密度
+            rtd_temps_filtered = [self.rtd_filters[i].get_filtered_value() for i in range(4)]
             avg_density = calculate_air_density(
-                np.mean(rtd_temps), pressure, humidity
+                np.mean(rtd_temps_filtered), pressure, humidity
             )
             self.density_data.append(avg_density)
 
@@ -524,8 +544,10 @@ class RTDWindDensityPlotter:
                         self.axes.flat[i].set_ylim(y_min, y_max)
 
                         # Update current value text
-                        current_rtd = self.rtd_temp_data[i][-1]
-                        current_density = calculate_air_density(current_rtd, pressure, humidity)
+                        current_rtd = self.rtd_temp_data[i][-1]  # 显示原始值
+                        # 使用滤波后的RTD温度计算密度和K因子
+                        current_rtd_filtered = self.rtd_filters[i].get_filtered_value()
+                        current_density = calculate_air_density(current_rtd_filtered, pressure, humidity)
                         K = (self.calibration_density / current_density) ** 0.5 if current_density > 0 else 1.0
 
                         self.current_value_texts[i].set_text(
